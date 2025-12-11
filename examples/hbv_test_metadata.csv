@@ -1,0 +1,11 @@
+sample_id,sampling_date,virus_name,geo_location,geo_county,geo_country,submitter,sequencing_run,notes
+HBV_001,2024-01-15,Hepatitis B Virus,Oslo,Oslo,Norway,JR,SANGER_2024_01,Genotype D
+HBV_002,2024-01-22,Hepatitis B Virus,Bergen,Vestland,Norway,JR,SANGER_2024_01,Genotype A
+HBV_003,2024-02-05,Hepatitis B Virus,Trondheim,Trøndelag,Norway,JR,SANGER_2024_02,Genotype D
+HBV_004,2024-02-12,Hepatitis B Virus,Stavanger,Rogaland,Norway,JR,SANGER_2024_02,Genotype A
+HBV_005,2024-03-01,Hepatitis B Virus,Oslo,Oslo,Norway,JR,SANGER_2024_03,Genotype D variant
+HBV_006,2024-03-15,Hepatitis B Virus,Drammen,Viken,Norway,JR,SANGER_2024_03,Genotype A
+HBV_007,2024-04-02,Hepatitis B Virus,Kristiansand,Agder,Norway,JR,SANGER_2024_04,Genotype D
+HBV_008,2024-04-18,Hepatitis B Virus,Tromsø,Troms og Finnmark,Norway,JR,SANGER_2024_04,Genotype A variant
+HBV_009,2024-05-01,Hepatitis B Virus,Ålesund,Møre og Romsdal,Norway,JR,SANGER_2024_05,Genotype D
+HBV_010,2024-05-20,Hepatitis B Virus,Bodø,Nordland,Norway,JR,SANGER_2024_05,Genotype A

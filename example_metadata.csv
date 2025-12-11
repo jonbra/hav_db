@@ -1,0 +1,4 @@
+"sample_id","sampling_date","sequence_length","geo_location","geo_county","geo_country","organism","gene_target","submitter","sequencing_run","notes"
+"SAMPLE_001","2025-01-15",1500,"Oslo","Oslo","Norway","Influenza A","HA","Lab1","RUN_2025_001",""
+"SAMPLE_002","2025-01-20",1480,"Bergen","Vestland","Norway","Influenza A","HA","Lab1","RUN_2025_001","Good quality"
+"SAMPLE_003","2025-02-01",1520,"Trondheim","Trøndelag","Norway","Influenza B","HA","Lab2","RUN_2025_002","Low coverage region at 3' end"
