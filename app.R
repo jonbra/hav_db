@@ -870,6 +870,52 @@ server <- function(input, output, session) {
       year = ifelse(is.na(metadata$sample_year), "", as.character(metadata$sample_year)),
       stringsAsFactors = FALSE
     )
+
+    # Deterministic country colour mapping (adds country__colour column)
+    countries <- unique(na.omit(microreact_meta$country[microreact_meta$country != ""]))
+    if (length(countries) > 0) {
+      n <- length(countries)
+      if (requireNamespace("RColorBrewer", quietly = TRUE)) {
+        pal_size <- min(12, max(3, n))
+        pal <- RColorBrewer::brewer.pal(pal_size, "Set3")
+        cols <- rep_len(pal, n)
+      } else {
+        cols <- grDevices::rainbow(n)
+      }
+      country_col_map <- setNames(cols, countries)
+      microreact_meta$country__colour <- vapply(microreact_meta$country, function(x) {
+        if (is.na(x) || x == "") return("")
+        if (!is.null(country_col_map[[x]])) return(country_col_map[[x]])
+        return("")
+      }, FUN.VALUE = "")
+    } else {
+      microreact_meta$country__colour <- ""
+    }
+
+    # Try to normalize latitude / longitude columns if present in source metadata
+    find_col <- function(patterns, df) {
+      nm <- names(df)
+      for (p in patterns) {
+        idx <- which(tolower(nm) == tolower(p))
+        if (length(idx)) return(nm[idx[1]])
+      }
+      for (p in patterns) {
+        idx <- grep(p, tolower(nm))
+        if (length(idx)) return(nm[idx[1]])
+      }
+      return(NA)
+    }
+
+    lat_col <- find_col(c("latitude", "lat", "y", "geo_lat", "gps_lat"), metadata)
+    lon_col <- find_col(c("longitude", "lon", "lng", "x", "geo_lon", "gps_lon"), metadata)
+
+    if (!is.na(lat_col) && !is.na(lon_col)) {
+      microreact_meta$latitude <- as.numeric(metadata[[lat_col]])
+      microreact_meta$longitude <- as.numeric(metadata[[lon_col]])
+    } else {
+      microreact_meta$latitude <- NA
+      microreact_meta$longitude <- NA
+    }
     
     # Convert tree to Newick string
     tree_newick <- write.tree(rv$tree_result)
@@ -991,6 +1037,14 @@ server <- function(input, output, session) {
             labelField = "id"
           )
         )
+        ,
+        # Provide viewer-friendly initial view preferences: label and colour by country
+        initial_view = list(
+          labelField = "country",
+          colourField = "country",
+          colourColumn = "country__colour",
+          showMap = TRUE
+        )
       )
       
       # Convert to JSON
@@ -1107,6 +1161,13 @@ server <- function(input, output, session) {
         files = files_obj,
         datasets = list(list(id = "dataset-1", file = data_file_id, idFieldName = "id")),
         trees = list(list(id = "tree-1", file = tree_file_id, labelField = "id"))
+        ,
+        initial_view = list(
+          labelField = "country",
+          colourField = "country",
+          colourColumn = "country__colour",
+          showMap = TRUE
+        )
       )
 
       json_body <- toJSON(microreact_project, auto_unbox = TRUE)
