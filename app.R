@@ -2,10 +2,9 @@
 # HAV Database - Shiny Application
 # =============================================================================
 # A web interface for managing sequences, searching, and running analyses.
-
+library(DT)
 library(shiny)
 library(shinydashboard)
-library(DT)
 library(plotly)
 library(DBI)
 library(RSQLite)
@@ -258,6 +257,8 @@ ui <- dashboardPage(
                 column(6, downloadButton("download_microreact_tree", "Download Tree", class = "btn-default", style = "width: 100%;"))
               ),
               hr(),
+                actionButton("save_open_local", "Save & Open in Local Viewer", class = "btn-warning", width = "100%"),
+                p(em("Writes .microreact into viewer/public/data and opens embedded viewer"), style = "font-size:11px; margin-top:5px;"),
               verbatimTextOutput("microreact_status")
           ),
           box(title = "Microreact Visualization", status = "success", solidHeader = TRUE, width = 6,
@@ -328,6 +329,8 @@ server <- function(input, output, session) {
       stringsAsFactors = FALSE
     ),
     current_microreact_url = NULL
+    ,
+    auto_open_local = FALSE
   )
   
   # Database connection (per session)
@@ -652,6 +655,7 @@ server <- function(input, output, session) {
       tryCatch({
         rv$msa_result <- run_msa_from_db(con(), rv$selected_for_analysis, input$msa_method)
         showNotification("Alignment complete!", type = "message")
+
       }, error = function(e) {
         showNotification(paste("Error:", e$message), type = "error")
       })
@@ -963,25 +967,16 @@ server <- function(input, output, session) {
       tree_file_id <- paste0("tree-", timestamp)
       
       # Create proper .microreact JSON structure for API
+      files_obj <- list()
+      files_obj[[data_file_id]] <- list(name = "metadata.csv", format = "text/csv", blob = data$metadata_csv)
+      files_obj[[tree_file_id]] <- list(name = "tree.nwk", format = "text/x-nh", blob = data$tree_newick)
+
       microreact_project <- list(
         meta = list(
           name = input$microreact_project_name,
           description = input$microreact_description
         ),
-        files = list(
-          list(
-            id = data_file_id,
-            name = "metadata.csv",
-            format = "text/csv",
-            blob = data$metadata_csv
-          ),
-          list(
-            id = tree_file_id,
-            name = "tree.nwk",
-            format = "text/x-nh",
-            blob = data$tree_newick
-          )
-        ),
+        files = files_obj,
         datasets = list(
           list(
             id = "dataset-1",
@@ -1018,10 +1013,10 @@ server <- function(input, output, session) {
         result <- content(response, as = "parsed")
         project_url <- result$url
         project_id <- result$id
-        
+
         # Store the URL
         rv$current_microreact_url <- project_url
-        
+
         # Add to history
         rv$microreact_projects <- rbind(
           data.frame(
@@ -1032,15 +1027,7 @@ server <- function(input, output, session) {
           ),
           rv$microreact_projects
         )
-        
-        output$microreact_status <- renderPrint({
-          cat("✓ Project created successfully!\n")
-          cat("Project ID:", project_id, "\n")
-          cat("URL:", project_url, "\n")
-        })
-        
         showNotification("Microreact project created!", type = "message")
-        
       } else {
         # Get detailed error info
         error_content <- content(response, as = "text")
@@ -1079,7 +1066,7 @@ server <- function(input, output, session) {
   
   # Render Microreact iframe
   output$microreact_iframe <- renderUI({
-    if (!is.null(rv$current_microreact_url) && !is.null(input$open_microreact_iframe) && input$open_microreact_iframe > 0) {
+    if (!is.null(rv$current_microreact_url) && ((!is.null(input$open_microreact_iframe) && input$open_microreact_iframe > 0) || isTRUE(rv$auto_open_local))) {
       tags$iframe(
         src = rv$current_microreact_url,
         width = "100%",
@@ -1092,6 +1079,52 @@ server <- function(input, output, session) {
     } else {
       p(em("Visualization will appear here after creating a project."))
     }
+  })
+
+  # Save .microreact into local viewer public/data and open in embedded viewer
+  observeEvent(input$save_open_local, {
+    req(rv$tree_result)
+    tryCatch({
+      data <- create_microreact_data()
+
+      # Build .microreact JSON
+      timestamp <- format(Sys.time(), "%Y%m%d%H%M%S")
+      safe_name <- gsub("[^A-Za-z0-9._-]", "_", input$microreact_project_name)
+      filename <- paste0(safe_name, "_", timestamp, ".microreact")
+
+      data_file_id <- paste0("data-", timestamp)
+      tree_file_id <- paste0("tree-", timestamp)
+
+      files_obj <- list()
+      files_obj[[data_file_id]] <- list(name = "metadata.csv", format = "text/csv", blob = data$metadata_csv)
+      files_obj[[tree_file_id]] <- list(name = "tree.nwk", format = "text/x-nh", blob = data$tree_newick)
+
+      microreact_project <- list(
+        meta = list(
+          name = input$microreact_project_name,
+          description = input$microreact_description
+        ),
+        files = files_obj,
+        datasets = list(list(id = "dataset-1", file = data_file_id, idFieldName = "id")),
+        trees = list(list(id = "tree-1", file = tree_file_id, labelField = "id"))
+      )
+
+      json_body <- toJSON(microreact_project, auto_unbox = TRUE)
+
+      # Ensure viewer public data dir exists
+      viewer_data_dir <- file.path(app_dir, "viewer", "public", "data")
+      dir.create(viewer_data_dir, recursive = TRUE, showWarnings = FALSE)
+      out_path <- file.path(viewer_data_dir, filename)
+      writeLines(json_body, out_path)
+
+      # Set URL to local viewer with file param
+      rv$current_microreact_url <- paste0("http://localhost:3000/?file=", URLencode(filename))
+      rv$auto_open_local <- TRUE
+
+      showNotification(paste("Saved .microreact to", out_path, "and set viewer URL."), type = "message")
+    }, error = function(e) {
+      showNotification(paste("Error saving local .microreact:", e$message), type = "error")
+    })
   })
   
   # Microreact history table

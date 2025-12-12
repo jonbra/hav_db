@@ -2,3 +2,4 @@ export/*
 .Rproj*
 export.csv
 export.zip
+.Rproj.user
