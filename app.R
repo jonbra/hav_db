@@ -201,6 +201,20 @@ ui <- dashboardPage(
           )
         ),
         fluidRow(
+          box(title = "Save / Manage Analyses", status = "primary", solidHeader = TRUE, width = 6,
+              textInput("analysis_name", "Analysis name:", placeholder = "Short descriptive name"),
+              textAreaInput("analysis_description", "Description:", rows = 3, placeholder = "Optional description"),
+              actionButton("save_analysis", "Save analysis", class = "btn-success", width = "100%"),
+              br(), br(),
+              actionButton("load_selected_analysis", "Load selected analysis", class = "btn-info", width = "48%"),
+              actionButton("delete_selected_analysis", "Delete selected analysis", class = "btn-danger", width = "48%")
+          ),
+          box(title = "Stored Analyses", status = "info", solidHeader = TRUE, width = 6,
+              DT::dataTableOutput("stored_analyses"),
+              p(style = "font-size: 11px;", em("Select a row then click 'Load selected analysis' to load into the viewer."))
+          )
+        ),
+        fluidRow(
           box(title = "Distance Matrix", status = "warning", solidHeader = TRUE, width = 6,
               actionButton("run_dist_btn", "Calculate Distances", class = "btn-warning"),
               plotlyOutput("dist_heatmap", height = 400)
@@ -1197,6 +1211,110 @@ server <- function(input, output, session) {
       datatable(data.frame(Message = "No projects created in this session"), 
                 options = list(dom = 't'), rownames = FALSE)
     }
+  })
+
+  # --------------------------------------------
+  # Analysis persistence (save / load analyses)
+  # --------------------------------------------
+
+  analysis_dir <- file.path(app_dir, "analysis")
+  dir.create(analysis_dir, recursive = TRUE, showWarnings = FALSE)
+
+  list_saved_analyses <- function() {
+    files <- list.files(analysis_dir, pattern = "\\.rds$", full.names = TRUE)
+    infos <- lapply(files, function(f) {
+      ok <- tryCatch({ a <- readRDS(f); TRUE }, error = function(e) FALSE)
+      if (!ok) return(NULL)
+      a <- readRDS(f)
+      data.frame(
+        file = basename(f),
+        name = if (!is.null(a$name)) a$name else "",
+        type = if (!is.null(a$type)) a$type else "",
+        created = if (!is.null(a$timestamp)) as.character(a$timestamp) else file.info(f)$ctime,
+        description = if (!is.null(a$description)) a$description else "",
+        stringsAsFactors = FALSE
+      )
+    })
+    do.call(rbind, Filter(Negate(is.null), infos))
+  }
+
+  output$stored_analyses <- renderDT({
+    df <- list_saved_analyses()
+    if (is.null(df) || nrow(df) == 0) return(datatable(data.frame(Message = "No saved analyses"), options = list(dom = 't')))
+    datatable(df, selection = 'single', rownames = FALSE, options = list(pageLength = 10))
+  })
+
+  observeEvent(input$save_analysis, {
+    # Save current analysis (msa and/or tree)
+    req(length(rv$selected_for_analysis) > 0)
+    name <- ifelse(nzchar(input$analysis_name), input$analysis_name, paste0("analysis_", format(Sys.time(), "%Y%m%d%H%M%S")))
+    description <- input$analysis_description %||% ""
+    a_type <- if (!is.null(rv$tree_result)) "phylogeny" else if (!is.null(rv$msa_result)) "alignment" else "analysis"
+    obj <- list(
+      name = name,
+      description = description,
+      type = a_type,
+      timestamp = Sys.time(),
+      sample_ids = rv$selected_for_analysis,
+      msa = rv$msa_result,
+      tree = rv$tree_result
+    )
+    safe <- gsub("[^A-Za-z0-9._-]", "_", name)
+    filename <- paste0(safe, "_", format(Sys.time(), "%Y%m%d%H%M%S"), ".rds")
+    outpath <- file.path(analysis_dir, filename)
+    saveRDS(obj, outpath)
+    showNotification(paste("Saved analysis:", filename), type = "message")
+    # trigger refresh
+    output$stored_analyses <- renderDT({
+      df <- list_saved_analyses()
+      datatable(df, selection = 'single', rownames = FALSE, options = list(pageLength = 10))
+    })
+  })
+
+  observeEvent(input$load_selected_analysis, {
+    sel <- input$stored_analyses_rows_selected
+    if (is.null(sel) || length(sel) == 0) {
+      showNotification("No analysis selected", type = "warning")
+      return()
+    }
+    df <- list_saved_analyses()
+    row <- df[sel, ]
+    if (is.null(row) || nrow(row) == 0) {
+      showNotification("Selection missing", type = "error")
+      return()
+    }
+    path <- file.path(analysis_dir, row$file)
+    obj <- tryCatch(readRDS(path), error = function(e) { NULL })
+    if (is.null(obj)) {
+      showNotification("Failed to read analysis file", type = "error")
+      return()
+    }
+    # Load into reactive values
+    rv$msa_result <- obj$msa
+    rv$tree_result <- obj$tree
+    rv$selected_for_analysis <- obj$sample_ids %||% rv$selected_for_analysis
+    showNotification(paste("Loaded analysis:", obj$name), type = "message")
+  })
+
+  observeEvent(input$delete_selected_analysis, {
+    sel <- input$stored_analyses_rows_selected
+    if (is.null(sel) || length(sel) == 0) {
+      showNotification("No analysis selected", type = "warning")
+      return()
+    }
+    df <- list_saved_analyses()
+    row <- df[sel, ]
+    path <- file.path(analysis_dir, row$file)
+    if (file.exists(path)) {
+      file.remove(path)
+      showNotification(paste("Deleted:", row$file), type = "message")
+    }
+    # refresh
+    output$stored_analyses <- renderDT({
+      df <- list_saved_analyses()
+      if (is.null(df) || nrow(df) == 0) return(datatable(data.frame(Message = "No saved analyses"), options = list(dom = 't')))
+      datatable(df, selection = 'single', rownames = FALSE, options = list(pageLength = 10))
+    })
   })
 }
 
