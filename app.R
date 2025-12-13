@@ -1265,13 +1265,17 @@ server <- function(input, output, session) {
         stringsAsFactors = FALSE
       )
     })
-    do.call(rbind, Filter(Negate(is.null), infos))
+    infos2 <- Filter(Negate(is.null), infos)
+    if (length(infos2) == 0) return(data.frame())
+    do.call(rbind, infos2)
   }
 
   output$stored_analyses <- renderDT({
     df <- list_saved_analyses()
     if (is.null(df) || nrow(df) == 0) return(datatable(data.frame(Message = "No saved analyses"), options = list(dom = 't')))
-    datatable(df, selection = 'single', rownames = FALSE, options = list(pageLength = 10))
+    # Display plain filename and allow selecting a row to load/delete
+    disp <- df[, c("file", "name", "type", "created", "description")]
+    datatable(disp, selection = list(mode = 'single', target = 'row'), rownames = FALSE, escape = TRUE, options = list(pageLength = 10))
   })
 
   observeEvent(input$save_analysis, {
@@ -1294,10 +1298,12 @@ server <- function(input, output, session) {
     outpath <- file.path(analysis_dir, filename)
     saveRDS(obj, outpath)
     showNotification(paste("Saved analysis:", filename), type = "message")
-    # trigger refresh
+    # trigger refresh: re-render stored analyses table with selection enabled
     output$stored_analyses <- renderDT({
       df <- list_saved_analyses()
-      datatable(df, selection = 'single', rownames = FALSE, options = list(pageLength = 10))
+      if (is.null(df) || nrow(df) == 0) return(datatable(data.frame(Message = "No saved analyses"), options = list(dom = 't')))
+      disp <- df[, c("file", "name", "type", "created", "description")]
+      datatable(disp, selection = list(mode = 'single', target = 'row'), rownames = FALSE, escape = TRUE, options = list(pageLength = 10))
     })
   })
 
@@ -1319,12 +1325,32 @@ server <- function(input, output, session) {
       showNotification("Failed to read analysis file", type = "error")
       return()
     }
+    # Coerce tree if needed
+    loaded_tree <- obj$tree
+    if (!is.null(loaded_tree)) {
+      if (is.character(loaded_tree)) {
+        # assume Newick string
+        loaded_tree2 <- tryCatch(ape::read.tree(text = loaded_tree), error = function(e) NULL)
+      } else if (inherits(loaded_tree, "phylo")) {
+        loaded_tree2 <- loaded_tree
+      } else if (is.list(loaded_tree) && !is.null(loaded_tree$tip.label)) {
+        class(loaded_tree) <- c("phylo", class(loaded_tree))
+        loaded_tree2 <- loaded_tree
+      } else {
+        loaded_tree2 <- NULL
+      }
+    } else {
+      loaded_tree2 <- NULL
+    }
+
     # Load into reactive values
     rv$msa_result <- obj$msa
-    rv$tree_result <- obj$tree
+    rv$tree_result <- loaded_tree2
     rv$selected_for_analysis <- obj$sample_ids %||% rv$selected_for_analysis
     showNotification(paste("Loaded analysis:", obj$name), type = "message")
   })
+
+  # (Removed link-click handler) Loading is handled by the 'Load selected analysis' button
 
   observeEvent(input$delete_selected_analysis, {
     sel <- input$stored_analyses_rows_selected
@@ -1343,7 +1369,8 @@ server <- function(input, output, session) {
     output$stored_analyses <- renderDT({
       df <- list_saved_analyses()
       if (is.null(df) || nrow(df) == 0) return(datatable(data.frame(Message = "No saved analyses"), options = list(dom = 't')))
-      datatable(df, selection = 'single', rownames = FALSE, options = list(pageLength = 10))
+      disp <- df[, c("file", "name", "type", "created", "description")]
+      datatable(disp, selection = list(mode = 'single', target = 'row'), rownames = FALSE, escape = TRUE, options = list(pageLength = 10))
     })
   })
 }
