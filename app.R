@@ -51,18 +51,48 @@ ui <- dashboardPage(
   
   dashboardBody(
     tags$head(
-      tags$style(HTML("
-        .sequence-display {
-          font-family: 'Courier New', monospace;
-          font-size: 12px;
-          word-wrap: break-word;
-          background-color: #f5f5f5;
-          padding: 10px;
-          border-radius: 4px;
-          max-height: 200px;
-          overflow-y: auto;
+      tags$style(HTML("\
+        .sequence-display {\
+          font-family: 'Courier New', monospace;\
+          font-size: 12px;\
+          word-wrap: break-word;\
+          background-color: #f5f5f5;\
+          padding: 10px;\
+          border-radius: 4px;\
+          max-height: 200px;\
+          overflow-y: auto;\
+        }\
+        .info-box-icon { background-color: rgba(0,0,0,0.1) !important; }\
+        /* Make the left sidebar fixed while scrolling */\
+        .main-sidebar {\
+          position: fixed !important;\
+          top: 50px; /* adjust if header height differs */\
+          left: 0;\
+          height: calc(100vh - 50px);\
+          overflow-y: auto;\
+          z-index: 1000;\
+        }\
+        /* Ensure content area leaves space for fixed sidebar */\
+        .content-wrapper, .main-footer {\
+          margin-left: 230px !important; /* match sidebar width */\
+        }\
+        /* Keep header fixed and above other elements */
+        .main-header {
+          position: fixed !important;
+          top: 0;
+          left: 0;
+          right: 0;
+          z-index: 1100;
+          width: 100%;
         }
-        .info-box-icon { background-color: rgba(0,0,0,0.1) !important; }
+        /* Ensure content is pushed below the fixed header */
+        .content-wrapper, .main-footer {
+          margin-top: 50px !important; /* same as header height */
+        }
+        /* Adjust sidebar top to sit below fixed header */
+        .main-sidebar {
+          top: 50px; /* adjust if header height differs */
+        }
       "))
     ),
     
