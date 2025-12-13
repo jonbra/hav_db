@@ -3,3 +3,4 @@ export/*
 export.csv
 export.zip
 .Rproj.user
+.Rhistory

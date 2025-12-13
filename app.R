@@ -119,7 +119,6 @@ ui <- dashboardPage(
           checkboxGroupInput("search_filter_missing", "Hide samples missing:",
             choices = list(
               "Sampling date" = "sampling_date",
-              "Geo location" = "geo_location",
               "Country" = "geo_country",
               "Genotype" = "genotype"
             ),
