@@ -193,6 +193,55 @@ When ready to move to a shared location:
 
 ## Future Development
 
+## Viewer Submodule
+
+The `viewer/` directory is included as a git submodule that points to a fork of the Microreact viewer maintained alongside this project. This lets you keep the viewer's history separate while allowing local edits to be pushed to your fork.
+
+- Fork URL used for this project: `git@github.com:jonbra/viewer.git`
+- Topic branch used for local integration changes: `feat/hav-db-integration`
+
+Common commands:
+
+Clone with submodules:
+```powershell
+git clone --recurse-submodules git@github.com:jonbra/hav_db.git
+```
+
+If you've already cloned without submodules:
+```powershell
+git submodule update --init --recursive
+```
+
+Work inside the submodule (make changes, push to your fork):
+```powershell
+cd viewer
+git checkout feat/hav-db-integration
+# make edits
+git add .
+git commit -m "Describe change"
+git push origin feat/hav-db-integration
+
+# Back in the superproject, record the new submodule commit
+cd ..
+git add viewer
+git commit -m "Update viewer submodule to latest"
+git push
+```
+
+To pull updates from upstream (microreact) into your fork:
+```powershell
+cd viewer
+git fetch upstream
+git checkout main
+git merge upstream/main
+git push origin main
+```
+
+Notes:
+- The superproject stores the exact commit SHA of the submodule. Updating the viewer requires committing the new SHA in the main repo.
+- If you prefer not to manage a submodule, the viewer can be vendored into this repo instead (copy files and remove the nested `.git`).
+
+
 - [ ] AB1 file import using `sangeranalyseR`
 - [ ] Quality trimming for raw sequences
 - [ ] Reference sequence management
