@@ -1,8 +1,9 @@
-## Application configuration
-# Place overrides here (do NOT commit credentials). This file is sourced by `app.R`.
-# You can override via environment variable `HAV_DB_PATH` as well.
+## Local application configuration (safe defaults)
+# This file is sourced by app.R. It prefers environment overrides and
+# falls back to sensible defaults when `app_dir` is not available.
 
-# `app_dir` is provided by `app.R` before sourcing this file.
+`%||%` <- function(x, y) if (is.null(x)) y else x
+
 DB_PATH <- Sys.getenv("HAV_DB_PATH", unset = "")
 if (identical(DB_PATH, "") || is.null(DB_PATH)) {
   if (exists("app_dir") && !is.null(app_dir) && nzchar(app_dir)) {
@@ -12,5 +13,5 @@ if (identical(DB_PATH, "") || is.null(DB_PATH)) {
   }
 }
 
-# Viewer dir for local .microreact files (override with HAV_VIEWER_DIR env var)
+# Directory used to store local viewer data (.microreact files)
 VIEWER_DIR <- Sys.getenv("HAV_VIEWER_DIR", unset = file.path(dirname(sys.frame(1)$ofile %||% "."), "viewer", "vendor", "public"))

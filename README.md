@@ -192,6 +192,13 @@ When ready to move to a shared location:
    ```
 
 ## Future Development
+### Recent additions
+
+- Schema proposal: see `docs/schema_normalization.md` and `sql/schema_proposal.sql` for a suggested normalized schema (proposal only — not applied).
+- QC helpers: `R/qc_checks.R` provides basic checks for missing sample fields, duplicate sequence IDs, and date parsing.
+- Provenance: `R/provenance_helpers.R` contains utilities to record ingestion and processing provenance.
+- CI: GitHub Actions workflow added at `.github/workflows/ci.yml` to run QC checks on push/PR.
+- Vendored viewer: a copy of the current `viewer` build is placed under `viewer/vendor/`; refresh it with `tools/vendor_viewer.ps1`.
 
 ## Viewer Submodule
 
