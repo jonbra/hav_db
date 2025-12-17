@@ -7,16 +7,17 @@ ui_tab_analysis <- function(){
       )
     ),
     fluidRow(
-      box(title = "Multiple Sequence Alignment", status = "info", solidHeader = TRUE, width = 6,
-          selectInput("msa_method", "Alignment Method:", choices = c("Muscle", "ClustalW", "ClustalOmega")),
+        box(title = "Multiple Sequence Alignment", status = "info", solidHeader = TRUE, width = 6,
+          selectInput("msa_method", "Alignment Method:", choices = c("MAFFT" = "mafft"), selected = "mafft"),
           actionButton("run_msa_btn", "Run Alignment", class = "btn-primary"),
           hr(),
           verbatimTextOutput("msa_stats"),
           downloadButton("download_alignment", "Download Alignment (FASTA)")
       ),
       box(title = "Phylogenetic Tree", status = "success", solidHeader = TRUE, width = 6,
-          selectInput("tree_method", "Tree Method:", choices = c("Neighbor-Joining" = "nj", "UPGMA" = "upgma")),
+          selectInput("tree_method", "Tree Method:", choices = c("Neighbor-Joining" = "nj", "UPGMA" = "upgma", "IQ-TREE (external)" = "iqtree")),
           selectInput("dist_model", "Distance Model:", choices = c("K80", "K81", "F81", "F84", "T92", "TN93", "JC69", "raw")),
+          numericInput("tree_threads", "Threads (for external tools):", value = 1, min = 1, step = 1),
           actionButton("run_tree_btn", "Build Tree", class = "btn-success"),
           hr(),
           plotOutput("tree_plot", height = 400),

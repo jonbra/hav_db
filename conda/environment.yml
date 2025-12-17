@@ -1,0 +1,11 @@
+name: hav_db
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - python=3.11
+  - mafft
+  - biopython
+  - pip
+  - pip:
+    - rpy2

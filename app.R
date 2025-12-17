@@ -9,7 +9,7 @@ library(plotly)
 library(DBI)
 library(RSQLite)
 library(Biostrings)
-library(msa)
+## 'msa' package is not required; external 'mafft' is used instead.
 library(ape)
 library(ggplot2)
 library(httr)
@@ -18,8 +18,32 @@ library(jsonlite)
 # Source helper functions
 `%||%` <- function(x, y) if (is.null(x)) y else x
 
-app_dir <- dirname(sys.frame(1)$ofile %||% ".")
-if (app_dir == ".") app_dir <- getwd()
+# Determine the application directory in a robust way. Accessing
+# `sys.frame(1)$ofile` can fail when running non-interactively (error:
+# "not that many frames on the stack"). Try multiple strategies and fall
+# back to the current working directory.
+app_dir <- (function() {
+  # 1) Try to read from sys.frame(1)$ofile if available
+  dir <- NULL
+  try({
+    f <- sys.frame(1)
+    if (!is.null(f$ofile)) dir <- dirname(f$ofile)
+  }, silent = TRUE)
+
+  # 2) Try commandArgs to detect --file= when invoked via Rscript
+  if (is.null(dir) || dir == "") {
+    args <- commandArgs(trailingOnly = FALSE)
+    file_arg <- grep("^--file=", args, value = TRUE)
+    if (length(file_arg) > 0) {
+      path <- sub("^--file=", "", file_arg[1])
+      dir <- dirname(path)
+    }
+  }
+
+  # 3) Fallback to getwd()
+  if (is.null(dir) || dir == "") dir <- getwd()
+  dir
+})()
 
 # Load optional config (sets `DB_PATH`, can be overridden via HAV_DB_PATH)
 local_cfg <- file.path(app_dir, "config_local.R")
@@ -69,6 +93,50 @@ server <- function(input, output, session) {
       c <- con()
       if (!is.null(c) && DBI::dbIsValid(c)) DBI::dbDisconnect(c)
     }, silent = TRUE)
+  })
+
+  # ==========================
+  # Dashboard outputs
+  # ==========================
+  output$total_sequences <- renderInfoBox({
+    req(con())
+    stats <- tryCatch(get_db_stats(con()), error = function(e) NULL)
+    n <- if (!is.null(stats)) stats$total_sequences else NA
+    infoBox("Total sequences", n, icon = icon("dna"), color = "purple")
+  })
+
+  output$total_viruses <- renderInfoBox({
+    req(con())
+    n <- tryCatch(DBI::dbGetQuery(con(), "SELECT COUNT(DISTINCT genotype) as n FROM metadata")$n, error = function(e) NA)
+    infoBox("Genotypes", n, icon = icon("th"), color = "green")
+  })
+
+  output$date_range <- renderInfoBox({
+    req(con())
+    dr <- tryCatch(DBI::dbGetQuery(con(), "SELECT MIN(sampling_date) as min_date, MAX(sampling_date) as max_date FROM metadata"), error = function(e) NULL)
+    txt <- if (!is.null(dr) && nrow(dr) > 0 && !is.na(dr$min_date)) paste0(dr$min_date, " - ", dr$max_date) else "N/A"
+    infoBox("Sampling range", txt, icon = icon("calendar-alt"), color = "blue")
+  })
+
+  output$virus_plot <- renderPlotly({
+    req(con())
+    df <- tryCatch(DBI::dbGetQuery(con(), "SELECT genotype, COUNT(*) AS n FROM metadata GROUP BY genotype"), error = function(e) NULL)
+    if (is.null(df) || nrow(df) == 0) return(NULL)
+    plot_ly(df, x = ~genotype, y = ~n, type = 'bar') %>% layout(xaxis = list(title = 'Genotype'), yaxis = list(title = 'Count'))
+  })
+
+  output$location_plot <- renderPlotly({
+    req(con())
+    df <- tryCatch(DBI::dbGetQuery(con(), "SELECT geo_country, COUNT(*) AS n FROM metadata GROUP BY geo_country"), error = function(e) NULL)
+    if (is.null(df) || nrow(df) == 0) return(NULL)
+    plot_ly(df, x = ~geo_country, y = ~n, type = 'bar') %>% layout(xaxis = list(title = 'Country'), yaxis = list(title = 'Count'))
+  })
+
+  output$recent_sequences <- DT::renderDataTable({
+    req(con())
+    df <- tryCatch(DBI::dbGetQuery(con(), "SELECT s.sample_id, m.sample_year, m.genotype, m.geo_country, s.created_at FROM sequences s LEFT JOIN metadata m ON s.sample_id = m.sample_id ORDER BY s.created_at DESC LIMIT 15"), error = function(e) NULL)
+    if (is.null(df)) return(NULL)
+    datatable(df, options = list(pageLength = 15), rownames = FALSE)
   })
 
   # Register server modules
@@ -490,4 +558,15 @@ server <- function(input, output, session) {
 # Run App
 # =============================================================================
 
-shinyApp(ui = ui, server = server)
+# Read host/port from environment (useful when deploying on a server).
+# Defaults: bind to all interfaces and port 3838 for remote testing.
+host <- Sys.getenv("SHINY_HOST", "0.0.0.0")
+port <- as.integer(Sys.getenv("SHINY_PORT", "3838"))
+
+# When running interactively (e.g. RStudio), keep the usual `shinyApp()` behavior.
+# For non-interactive/server runs, call `shiny::runApp()` with explicit host/port.
+if (interactive()) {
+  shinyApp(ui = ui, server = server)
+} else {
+  shiny::runApp(list(ui = ui, server = server), host = host, port = port)
+}

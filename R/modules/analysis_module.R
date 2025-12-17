@@ -60,8 +60,16 @@ register_analysis_server <- function(input, output, session, rv, con){
       tryCatch({
         if (input$tree_method == "nj") {
           rv$tree_result <- build_nj_tree(rv$msa_result, input$dist_model)
-        } else {
+        } else if (input$tree_method == "upgma") {
           rv$tree_result <- build_upgma_tree(rv$msa_result, input$dist_model)
+        } else if (input$tree_method == "iqtree") {
+          # Export alignment to fasta and run IQ-TREE wrapper
+          fa <- tempfile(fileext = ".fa")
+          export_alignment_fasta(rv$msa_result, fa)
+          pref <- tempfile("iqtree")
+          rv$tree_result <- run_iqtree(fa, prefix = pref, threads = as.integer(input$tree_threads %||% 1))
+        } else {
+          stop("Unsupported tree method")
         }
         showNotification("Tree built!", type = "message")
       }, error = function(e) {

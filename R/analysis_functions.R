@@ -4,9 +4,24 @@
 # Multiple sequence alignment, phylogenetic tree construction, and clustering.
 
 library(Biostrings)
-library(msa)
 library(ape)
 library(jsonlite)
+
+# Source optional analysis helpers (phylogeny wrappers) if available
+phy_file <- NULL
+if (exists("app_dir") && nzchar(app_dir)) {
+  phy_file <- file.path(app_dir, "R", "analyses", "phylogeny.R")
+} else {
+  phy_file <- file.path("R", "analyses", "phylogeny.R")
+}
+if (!is.null(phy_file) && file.exists(phy_file)) {
+  try(source(phy_file), silent = TRUE)
+}
+
+# NOTE: the `msa` Bioconductor package is not used. Alignments are performed
+# by calling the external `mafft` binary (installed with conda or package
+# manager). This avoids compiling bundled C/C++ code and keeps the runtime
+# environment lightweight.
 
 # =============================================================================
 # Multiple Sequence Alignment
@@ -14,19 +29,39 @@ library(jsonlite)
 
 #' Perform multiple sequence alignment
 #' @param dna_set DNAStringSet object
-#' @param method Alignment method: "Muscle", "ClustalW", or "ClustalOmega"
+#' @param method Alignment method: currently uses external "mafft" via system call
 #' @return MsaDNAMultipleAlignment object
-run_msa <- function(dna_set, method = "Muscle") {
-  if (length(dna_set) < 2) {
-    stop("Need at least 2 sequences for alignment")
+run_msa <- function(dna_set, method = "mafft") {
+  # dna_set: DNAStringSet or character vector of sequences
+  if (length(dna_set) < 2) stop("Need at least 2 sequences for alignment")
+
+  # We only support mafft via system call for now. The `method` argument is
+  # kept for API compatibility but ignored when using mafft.
+  if (!nzchar(Sys.which("mafft"))) stop("mafft executable not found on PATH; install mafft (conda/apt)")
+
+  # Write input sequences to a temporary FASTA file
+  in_fa <- tempfile(fileext = ".fa")
+  out_fa <- tempfile(fileext = ".aligned.fa")
+
+  # Accept DNAStringSet or character vector
+  if (inherits(dna_set, "DNAStringSet")) {
+    Biostrings::writeXStringSet(dna_set, filepath = in_fa, format = "fasta")
+  } else if (is.character(dna_set)) {
+    seqs <- Biostrings::DNAStringSet(dna_set)
+    Biostrings::writeXStringSet(seqs, filepath = in_fa, format = "fasta")
+  } else {
+    stop("dna_set must be a DNAStringSet or character vector")
   }
-  
-  valid_methods <- c("Muscle", "ClustalW", "ClustalOmega")
-  if (!method %in% valid_methods) {
-    stop("Invalid method. Choose from: ", paste(valid_methods, collapse = ", "))
-  }
-  
-  msa::msa(dna_set, method = method)
+
+  # Run mafft --auto for reasonable defaults. Write stdout to out_fa.
+  args <- c("--auto", in_fa)
+  res <- system2("mafft", args = args, stdout = out_fa, stderr = tempfile())
+  if (res != 0) stop("mafft alignment failed (check installation and input sequences)")
+
+  # Read aligned sequences back into R as a DNAStringSet
+  aligned <- Biostrings::readDNAStringSet(out_fa, format = "fasta")
+
+  aligned
 }
 
 #' Run MSA on database sequences
@@ -34,7 +69,7 @@ run_msa <- function(dna_set, method = "Muscle") {
 #' @param sample_ids Vector of sample IDs
 #' @param method Alignment method
 #' @return MsaDNAMultipleAlignment object
-run_msa_from_db <- function(con, sample_ids, method = "Muscle") {
+run_msa_from_db <- function(con, sample_ids, method = "mafft") {
   dna_set <- db_to_dna_stringset(con, sample_ids)
   run_msa(dna_set, method)
 }
@@ -43,13 +78,18 @@ run_msa_from_db <- function(con, sample_ids, method = "Muscle") {
 #' @param msa_result MsaDNAMultipleAlignment object
 #' @return DNAbin object
 msa_to_dnabin <- function(msa_result) {
-  # Convert to DNAStringSet first
-  aligned_seqs <- as(msa_result, "DNAStringSet")
-  
-  # Convert to matrix
+  # Accept either a DNAStringSet (returned by our mafft wrapper) or an
+  # MsaDNAMultipleAlignment object from the `msa` package. Convert to
+  # a character matrix and then to DNAbin.
+  if (inherits(msa_result, "DNAStringSet")) {
+    aligned_seqs <- msa_result
+  } else if (inherits(msa_result, "MsaDNAMultipleAlignment") || inherits(msa_result, "MsaAAMultipleAlignment")) {
+    aligned_seqs <- as(msa_result, "DNAStringSet")
+  } else {
+    stop("Unsupported msa_result type for msa_to_dnabin")
+  }
+
   seq_matrix <- as.matrix(aligned_seqs)
-  
-  # Convert to DNAbin
   ape::as.DNAbin(seq_matrix)
 }
 
@@ -58,7 +98,18 @@ msa_to_dnabin <- function(msa_result) {
 #' @param output_file Path for output file
 #' @return Path to output file
 export_alignment_fasta <- function(msa_result, output_file) {
-  aligned_seqs <- as(msa_result, "DNAStringSet")
+  if (inherits(msa_result, "DNAStringSet")) {
+    aligned_seqs <- msa_result
+  } else if (inherits(msa_result, "MsaDNAMultipleAlignment") || inherits(msa_result, "MsaAAMultipleAlignment")) {
+    aligned_seqs <- as(msa_result, "DNAStringSet")
+  } else {
+    stop("Unsupported msa_result type for export_alignment_fasta")
+  }
+  # Ensure sequence names are present (IQ-TREE requires non-empty unique names)
+  seq_names <- names(aligned_seqs)
+  if (is.null(seq_names) || any(nzchar(seq_names) == FALSE)) {
+    names(aligned_seqs) <- paste0("seq", seq_len(length(aligned_seqs)))
+  }
   Biostrings::writeXStringSet(aligned_seqs, output_file, format = "fasta")
   output_file
 }
@@ -67,9 +118,14 @@ export_alignment_fasta <- function(msa_result, output_file) {
 #' @param msa_result MsaDNAMultipleAlignment object
 #' @return List with alignment statistics
 alignment_stats <- function(msa_result) {
-  aligned_seqs <- as(msa_result, "DNAStringSet")
-  
-  # Get alignment as matrix
+  if (inherits(msa_result, "DNAStringSet")) {
+    aligned_seqs <- msa_result
+  } else if (inherits(msa_result, "MsaDNAMultipleAlignment") || inherits(msa_result, "MsaAAMultipleAlignment")) {
+    aligned_seqs <- as(msa_result, "DNAStringSet")
+  } else {
+    stop("Unsupported msa_result type for alignment_stats")
+  }
+
   aln_matrix <- as.matrix(aligned_seqs)
   
   # Calculate statistics
@@ -154,7 +210,7 @@ build_upgma_tree <- function(msa_result, model = "K80") {
 #' @param dist_model Distance model
 #' @return phylo object
 build_tree_from_db <- function(con, sample_ids, method = "nj", 
-                                alignment_method = "Muscle", dist_model = "K80") {
+                                alignment_method = "mafft", dist_model = "K80") {
   # Run alignment
   msa_result <- run_msa_from_db(con, sample_ids, alignment_method)
   
@@ -163,8 +219,19 @@ build_tree_from_db <- function(con, sample_ids, method = "nj",
     build_nj_tree(msa_result, dist_model)
   } else if (method == "upgma") {
     build_upgma_tree(msa_result, dist_model)
+  } else if (method == "iqtree" || method == "iq") {
+    # Use iqtree external binary. Export alignment to fasta and call wrapper.
+    fa <- tempfile(fileext = ".fa")
+    export_alignment_fasta(msa_result, fa)
+    # Prefix for iqtree files
+    pref <- tempfile("iqtree")
+    if (!exists("run_iqtree")) stop("IQ-TREE support not available (run_iqtree missing)")
+    run_iqtree(fa, prefix = pref, threads = 1)
+    treefile <- paste0(pref, ".treefile")
+    if (!file.exists(treefile)) stop("IQ-TREE did not produce a treefile")
+    ape::read.tree(treefile)
   } else {
-    stop("Invalid method. Choose 'nj' or 'upgma'")
+    stop("Invalid method. Choose 'nj', 'upgma', or 'iqtree'")
   }
 }
 
@@ -218,7 +285,7 @@ calculate_distance_matrix <- function(msa_result, model = "K80", as_percent = FA
 #' @param model Distance model
 #' @return Distance matrix
 distance_matrix_from_db <- function(con, sample_ids, model = "K80") {
-  msa_result <- run_msa_from_db(con, sample_ids, "Muscle")
+  msa_result <- run_msa_from_db(con, sample_ids, "mafft")
   calculate_distance_matrix(msa_result, model)
 }
 
@@ -272,7 +339,7 @@ cluster_by_k <- function(msa_result, k, model = "K80") {
 #' @param k Number of clusters (or NULL to use threshold)
 #' @return Data frame with cluster assignments
 cluster_from_db <- function(con, sample_ids, threshold = 0.03, k = NULL) {
-  msa_result <- run_msa_from_db(con, sample_ids, "Muscle")
+  msa_result <- run_msa_from_db(con, sample_ids, "mafft")
   
   if (!is.null(k)) {
     cluster_by_k(msa_result, k)
@@ -347,7 +414,7 @@ deserialize_result <- function(json_str) {
 #' @param analysis_name Name for saved analysis
 #' @return List with alignment, tree, and statistics
 run_phylogenetic_analysis <- function(con, sample_ids, 
-                                       alignment_method = "Muscle",
+                                       alignment_method = "mafft",
                                        tree_method = "nj",
                                        dist_model = "K80",
                                        save_to_db = FALSE,
@@ -360,8 +427,17 @@ run_phylogenetic_analysis <- function(con, sample_ids,
   cat("Building phylogenetic tree...\n")
   if (tree_method == "nj") {
     tree <- build_nj_tree(msa_result, dist_model)
-  } else {
+  } else if (tree_method == "upgma") {
     tree <- build_upgma_tree(msa_result, dist_model)
+  } else if (tree_method == "iqtree" || tree_method == "iq") {
+    # Export alignment and run IQ-TREE
+    fa <- tempfile(fileext = ".fa")
+    export_alignment_fasta(msa_result, fa)
+    pref <- tempfile("iqtree")
+    if (!exists("run_iqtree")) stop("IQ-TREE wrapper not available. Ensure R/analyses/phylogeny.R is present and sourced.")
+    tree <- run_iqtree(fa, prefix = pref, threads = 1)
+  } else {
+    stop("Unsupported tree_method; choose 'nj', 'upgma', or 'iqtree'")
   }
   tree_info <- tree_stats(tree)
   
