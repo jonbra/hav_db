@@ -10,9 +10,16 @@ ui_tab_analysis <- function(){
         box(title = "Multiple Sequence Alignment", status = "info", solidHeader = TRUE, width = 6,
           selectInput("msa_method", "Alignment Method:", choices = c("MAFFT" = "mafft"), selected = "mafft"),
           actionButton("run_msa_btn", "Run Alignment", class = "btn-primary"),
-          hr(),
           verbatimTextOutput("msa_stats"),
-          downloadButton("download_alignment", "Download Alignment (FASTA)")
+          downloadButton("download_alignment", "Download Alignment (FASTA)"),
+          hr(),
+          textAreaInput("blast_query_seq", "Query sequence (FASTA or raw sequence):", rows = 4, placeholder = "Paste sequence or FASTA here"),
+          fileInput("blast_query_file", "Or upload FASTA file:", accept = c(".fa", ".fasta")),
+          numericInput("blast_max_hits", "Max hits per query:", value = 10, min = 1, step = 1),
+          numericInput("blast_min_identity", "Min percent identity:", value = 70, min = 0, max = 100, step = 1),
+          actionButton("find_closest_btn", "Find Closest Sequences", class = "btn-primary"),
+          downloadButton("download_blast_results", "Download BLAST Hits (FASTA)"),
+          DT::dataTableOutput("blast_hits")
       ),
       box(title = "Phylogenetic Tree", status = "success", solidHeader = TRUE, width = 6,
           selectInput("tree_method", "Tree Method:", choices = c("Neighbor-Joining" = "nj", "UPGMA" = "upgma", "IQ-TREE (external)" = "iqtree")),

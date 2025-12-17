@@ -52,6 +52,62 @@ register_analysis_server <- function(input, output, session, rv, con){
     }
   )
 
+  # BLAST-like nearest-match search (R-based)
+observeEvent(input$find_closest_btn, {
+  req(con())
+  # read query
+  qset <- NULL
+  if (!is.null(input$blast_query_file) && nzchar(input$blast_query_file$datapath)) {
+    qfile <- input$blast_query_file$datapath
+    qset <- tryCatch(readDNAStringSet(qfile, format = "fasta"), error = function(e) NULL)
+  } else if (!is.null(input$blast_query_seq) && nzchar(input$blast_query_seq)) {
+    txt <- input$blast_query_seq
+    if (grepl("^>", trimws(txt))) {
+      tf <- tempfile(fileext = ".fa")
+      writeLines(txt, tf)
+      qset <- tryCatch(readDNAStringSet(tf, format = "fasta"), error = function(e) NULL)
+    } else {
+      qset <- DNAStringSet(toupper(gsub("\\s+", "", txt)))
+      names(qset) <- "query_1"
+    }
+  } else {
+    showNotification("Provide a query sequence or upload a FASTA file", type = "warning")
+    return()
+  }
+
+  # Run the R-based nearest-match function
+  tryCatch({
+    max_hits <- as.integer(input$blast_max_hits %||% 10)
+    min_id <- as.numeric(input$blast_min_identity %||% 0)
+    res <- run_blast(query = qset, con = con(), max_hits = max_hits, min_identity = min_id)
+    if (is.null(res) || is.null(res$hits) || nrow(res$hits) == 0) {
+      output$blast_hits <- renderDT({ datatable(data.frame(Message = "No hits found"), options = list(dom = 't')) })
+      rv$blast_hits <- NULL
+      showNotification("No hits found", type = "message")
+      return()
+    }
+    rv$blast_hits <- res
+    output$blast_hits <- renderDT({
+      datatable(res$hits, options = list(pageLength = 25), rownames = FALSE)
+    })
+    showNotification("Nearest-match search complete", type = "message")
+  }, error = function(e) {
+    showNotification(paste("Search failed:", e$message), type = "error")
+  })
+})
+
+output$download_blast_results <- downloadHandler(
+  filename = function() paste0("blast_hits_", Sys.Date(), ".fasta"),
+  content = function(file) {
+    req(rv$blast_hits)
+    if (!is.null(rv$blast_hits$sequences) && length(rv$blast_hits$sequences) > 0) {
+      Biostrings::writeXStringSet(rv$blast_hits$sequences, filepath = file, format = "fasta")
+    } else {
+      writeLines(">no_sequences", file)
+    }
+  }
+)
+
   # Tree
   observeEvent(input$run_tree_btn, {
     req(rv$msa_result)

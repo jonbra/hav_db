@@ -64,6 +64,19 @@ source(file.path(app_dir, "R", "sequence_functions.R"))
 source(file.path(app_dir, "R", "analysis_functions.R"))
 source(file.path(app_dir, "R", "provenance_helpers.R"))
 
+python - <<'PY'
+from pathlib import Path
+p = Path('app.R')
+txt = p.read_text()
+old = 'source(file.path(app_dir, "R", "analysis_functions.R"))'
+if old in txt:
+    txt = txt.replace(old, old + '\nsource(file.path(app_dir, "R", "analyses", "blast_wrapper.R"))')
+    p.write_text(txt)
+    print("app.R updated to source blast_wrapper.R")
+else:
+    print("analysis_functions.R source not found — please add:\nsource(file.path(app_dir, 'R', 'analyses', 'blast_wrapper.R'))\nmanually in app.R")
+PY
+
 # Source UI components and build UI
 source(file.path(app_dir, "R", "ui_components.R"))
 ui <- build_ui(app_dir)
