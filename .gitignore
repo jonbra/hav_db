@@ -1,4 +1,18 @@
-export/*
+# Ignore IQ-TREE runtime outputs and local test artifacts
+iqrun*
+iqtest*
+test_iq*.fa
+test_shiny.R
+app_run.log
+
+# R / RStudio
+.Rhistory
+.RData
+.Rproj.user/
+
+# conda envs and caches
+/.conda/
+envs/export/*
 .Rproj*
 export.csv
 export.zip
