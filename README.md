@@ -12,6 +12,14 @@ A lightweight local database for storing and analyzing HAV sequences with metada
 
 ## Quick Start
 
+```bash
+# Access the database on port 3838
+R -e "shiny::runApp('.', host='0.0.0.0', port=3838)"
+
+# In another terminal, activate the Microreact viewer on port 3000
+npm run dev -- -p 3000
+```
+
 ### 1. Install Required Packages
 
 ```r
