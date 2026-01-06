@@ -123,7 +123,12 @@ output$download_blast_results <- downloadHandler(
           fa <- tempfile(fileext = ".fa")
           export_alignment_fasta(rv$msa_result, fa)
           pref <- tempfile("iqtree")
-          rv$tree_result <- run_iqtree(fa, prefix = pref, threads = as.integer(input$tree_threads %||% 1))
+          # Get IQ-TREE specific parameters from UI
+          iq_model <- input$iqtree_model %||% "GTR+G+I"
+          iq_bootstrap <- as.integer(input$iqtree_bootstrap %||% 1000)
+          iq_threads <- as.integer(input$iqtree_threads %||% 2)
+          rv$tree_result <- run_iqtree(fa, prefix = pref, threads = iq_threads,
+                                       model = iq_model, bootstrap = iq_bootstrap)
         } else {
           stop("Unsupported tree method")
         }

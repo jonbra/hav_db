@@ -1,6 +1,36 @@
 # Alignment utilities using MAFFT
 # Pure R functions, no Shiny/reactivity. Deterministic I/O.
 
+# Helper function to get binary path from hav_db conda environment
+get_conda_bin <- function(tool) {
+  # Try hav_db conda environment first
+  conda_base <- Sys.getenv("CONDA_PREFIX_1", Sys.getenv("CONDA_PREFIX", ""))
+  if (nzchar(conda_base)) {
+    # Check in hav_db environment under the conda base
+    hav_db_bin <- file.path(dirname(conda_base), "envs", "hav_db", "bin", tool)
+    if (file.exists(hav_db_bin)) return(hav_db_bin)
+  }
+  
+  # Common conda installation paths
+  home <- Sys.getenv("HOME")
+  conda_paths <- c(
+    file.path(home, "miniforge3", "envs", "hav_db", "bin", tool),
+    file.path(home, "miniconda3", "envs", "hav_db", "bin", tool),
+    file.path(home, "anaconda3", "envs", "hav_db", "bin", tool),
+    file.path("/opt", "conda", "envs", "hav_db", "bin", tool)
+  )
+  
+  for (p in conda_paths) {
+    if (file.exists(p)) return(p)
+  }
+  
+  # Fall back to PATH
+  path_bin <- Sys.which(tool)
+  if (nzchar(path_bin)) return(path_bin)
+  
+  stop(sprintf("%s not found. Ensure the hav_db conda environment is set up: conda env create -f conda/environment.yml", tool))
+}
+
 write_fasta_from_strings <- function(seqs, ids = NULL, path) {
   if (is.null(ids)) ids <- paste0("seq", seq_along(seqs))
   if (length(ids) != length(seqs)) stop("ids must match seqs length")
@@ -11,9 +41,9 @@ write_fasta_from_strings <- function(seqs, ids = NULL, path) {
 }
 
 run_mafft <- function(input_fasta, output_fasta, threads = 1, opts = "--auto") {
-  if (!nzchar(Sys.which("mafft"))) stop("mafft not found on PATH")
+  bin <- get_conda_bin("mafft")
   args <- c("--thread", as.character(threads), opts, input_fasta)
-  res <- system2("mafft", args = args, stdout = output_fasta, stderr = TRUE)
+  res <- system2(bin, args = args, stdout = output_fasta, stderr = TRUE)
   if (!file.exists(output_fasta)) stop("mafft failed to produce output file")
   output_fasta
 }

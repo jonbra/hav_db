@@ -23,8 +23,21 @@ ui_tab_analysis <- function(){
       ),
       box(title = "Phylogenetic Tree", status = "success", solidHeader = TRUE, width = 6,
           selectInput("tree_method", "Tree Method:", choices = c("Neighbor-Joining" = "nj", "UPGMA" = "upgma", "IQ-TREE (external)" = "iqtree")),
-          selectInput("dist_model", "Distance Model:", choices = c("K80", "K81", "F81", "F84", "T92", "TN93", "JC69", "raw")),
-          numericInput("tree_threads", "Threads (for external tools):", value = 1, min = 1, step = 1),
+          # Distance model only for NJ/UPGMA
+          conditionalPanel(
+            condition = "input.tree_method != 'iqtree'",
+            selectInput("dist_model", "Distance Model:", choices = c("K80", "K81", "F81", "F84", "T92", "TN93", "JC69", "raw"))
+          ),
+          # IQ-TREE specific options
+          conditionalPanel(
+            condition = "input.tree_method == 'iqtree'",
+            textInput("iqtree_model", "Substitution Model:", value = "GTR+G+I", 
+                      placeholder = "e.g., GTR+G+I, HKY+G, TIM+I, MFP (auto)"),
+            numericInput("iqtree_bootstrap", "Ultrafast Bootstrap Replicates (-B):", 
+                         value = 1000, min = 0, max = 100000, step = 100),
+            helpText("Set to 0 to disable bootstrap analysis."),
+            numericInput("iqtree_threads", "CPU Threads (-T):", value = 2, min = 1, max = 64, step = 1)
+          ),
           actionButton("run_tree_btn", "Build Tree", class = "btn-success"),
           hr(),
           plotOutput("tree_plot", height = 400),

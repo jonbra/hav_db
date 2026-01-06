@@ -7,7 +7,18 @@ library(Biostrings)
 library(ape)
 library(jsonlite)
 
-# Source optional analysis helpers (phylogeny wrappers) if available
+# Source alignment helpers first (provides get_conda_bin function)
+aln_file <- NULL
+if (exists("app_dir") && nzchar(app_dir)) {
+  aln_file <- file.path(app_dir, "R", "analyses", "alignment.R")
+} else {
+  aln_file <- file.path("R", "analyses", "alignment.R")
+}
+if (!is.null(aln_file) && file.exists(aln_file)) {
+  try(source(aln_file), silent = TRUE)
+}
+
+# Source phylogeny wrappers (depends on get_conda_bin from alignment.R)
 phy_file <- NULL
 if (exists("app_dir") && nzchar(app_dir)) {
   phy_file <- file.path(app_dir, "R", "analyses", "phylogeny.R")
@@ -37,7 +48,14 @@ run_msa <- function(dna_set, method = "mafft") {
 
   # We only support mafft via system call for now. The `method` argument is
   # kept for API compatibility but ignored when using mafft.
-  if (!nzchar(Sys.which("mafft"))) stop("mafft executable not found on PATH; install mafft (conda/apt)")
+  # Use get_conda_bin to find mafft in hav_db conda environment
+  mafft_bin <- tryCatch(
+    get_conda_bin("mafft"),
+    error = function(e) NULL
+  )
+  if (is.null(mafft_bin) || !nzchar(mafft_bin)) {
+    stop("mafft not found. Ensure the hav_db conda environment is set up: conda env create -f conda/environment.yml")
+  }
 
   # Write input sequences to a temporary FASTA file
   in_fa <- tempfile(fileext = ".fa")
@@ -55,7 +73,7 @@ run_msa <- function(dna_set, method = "mafft") {
 
   # Run mafft --auto for reasonable defaults. Write stdout to out_fa.
   args <- c("--auto", in_fa)
-  res <- system2("mafft", args = args, stdout = out_fa, stderr = tempfile())
+  res <- system2(mafft_bin, args = args, stdout = out_fa, stderr = tempfile())
   if (res != 0) stop("mafft alignment failed (check installation and input sequences)")
 
   # Read aligned sequences back into R as a DNAStringSet

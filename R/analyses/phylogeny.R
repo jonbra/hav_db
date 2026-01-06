@@ -15,14 +15,32 @@ build_upgma_tree_from_alignment <- function(aligned_dna, model = "K80") {
   ape::ladderize(tr)
 }
 
-run_iqtree <- function(alignment_fasta, prefix = tempfile("iq"), threads = 1, extra_args = NULL) {
-  # Try common binary names
-  bin <- Sys.which("iqtree")
-  if (!nzchar(bin)) bin <- Sys.which("iqtree2")
-  if (!nzchar(bin)) stop("iqtree not found on PATH")
+run_iqtree <- function(alignment_fasta, prefix = tempfile("iq"), threads = 2, 
+                       model = "GTR+G+I", bootstrap = 1000, extra_args = NULL) {
+  # Use iqtree from hav_db conda environment (IQ-TREE 3.x)
+  # The get_conda_bin helper is defined in alignment.R and sourced before this file
+  bin <- tryCatch(
+    get_conda_bin("iqtree"),
+    error = function(e) NULL
+  )
+  if (is.null(bin) || !nzchar(bin)) {
+    stop("iqtree not found. Ensure the hav_db conda environment is set up: conda env create -f conda/environment.yml")
+  }
 
   # Use --redo by default to overwrite previous runs/checkpoints
-  args <- c("--redo", "-s", alignment_fasta, "-nt", as.character(threads), "-pre", prefix)
+  # Use -T for threads (IQ-TREE 2.x/3.x syntax, replaces -nt)
+  args <- c("--redo", "-s", alignment_fasta, "-T", as.character(threads), "-pre", prefix)
+  
+  # Add substitution model (default GTR+G+I)
+  if (!is.null(model) && nzchar(model)) {
+    args <- c(args, "-m", model)
+  }
+  
+  # Add ultrafast bootstrap replicates if bootstrap > 0
+  if (!is.null(bootstrap) && !is.na(bootstrap) && bootstrap > 0) {
+    args <- c(args, "-B", as.character(as.integer(bootstrap)))
+  }
+  
   if (!is.null(extra_args)) args <- c(args, extra_args)
 
   outf <- tempfile("iq_out")
