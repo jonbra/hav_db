@@ -14,7 +14,6 @@ app_run.log
 /.conda/
 envs/export/*
 .Rproj*
-export.csv
-export.zip
+export/*
 .Rproj.user
 .Rhistory
