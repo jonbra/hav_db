@@ -2,14 +2,43 @@ register_microreact_server <- function(input, output, session, rv, con, app_dir)
   # Source the API functions
   source(file.path(app_dir, "R", "microreact_api.R"), local = TRUE)
   
+  # File path for persistent token storage (not in git)
+  token_file <- file.path(app_dir, ".microreact_token")
+  
+  # Load saved token on startup
+  if (file.exists(token_file)) {
+    saved_token <- tryCatch({
+      readLines(token_file, warn = FALSE)[1]
+    }, error = function(e) NULL)
+    if (!is.null(saved_token) && nchar(saved_token) > 50) {
+      rv$microreact_token <- saved_token
+      # Update the input field with saved token
+      updateTextInput(session, "microreact_api_token", value = saved_token)
+      output$api_token_status <- renderPrint({
+        cat("✓ Token loaded from saved settings\n")
+        cat("Token preview:", substr(saved_token, 1, 20), "...\n")
+      })
+    }
+  }
+  
   # Microreact Settings handlers
   observeEvent(input$save_api_token, {
     if (nchar(input$microreact_api_token) > 0) {
       rv$microreact_token <- input$microreact_api_token
-      showNotification("API token saved for this session", type = "message")
-      output$api_token_status <- renderPrint({
-        cat("✓ Token saved\n")
-        cat("Token will be validated when creating a project.\n")
+      # Persist to file
+      tryCatch({
+        writeLines(input$microreact_api_token, token_file)
+        showNotification("API token saved permanently", type = "message")
+        output$api_token_status <- renderPrint({
+          cat("✓ Token saved permanently\n")
+          cat("Token will be loaded automatically on restart.\n")
+        })
+      }, error = function(e) {
+        showNotification("Token saved for session only (could not persist to file)", type = "warning")
+        output$api_token_status <- renderPrint({
+          cat("✓ Token saved for this session\n")
+          cat("⚠ Could not persist to file:", e$message, "\n")
+        })
       })
     } else {
       showNotification("Please enter an API token", type = "warning")
@@ -21,13 +50,17 @@ register_microreact_server <- function(input, output, session, rv, con, app_dir)
     token <- input$microreact_api_token
     if (grepl("^eyJ", token) && nchar(token) > 50) {
       rv$microreact_token <- token
+      # Also persist when testing
+      tryCatch({
+        writeLines(token, token_file)
+      }, error = function(e) NULL)
       output$api_token_status <- renderPrint({
         cat("✓ Token format looks valid (JWT)\n")
-        cat("Token saved for this session.\n")
+        cat("Token saved permanently.\n")
         cat("Note: Full validation occurs when creating a project.\n")
         cat("\nToken preview:", substr(token, 1, 20), "...\n")
       })
-      showNotification("Token saved! Will be validated on first use.", type = "message")
+      showNotification("Token saved permanently!", type = "message")
     } else {
       output$api_token_status <- renderPrint({
         cat("⚠ Token format may be incorrect\n")
@@ -47,9 +80,77 @@ register_microreact_server <- function(input, output, session, rv, con, app_dir)
     metadata <- get_sequences_with_metadata(con(), sample_ids)
     tree_tip_labels <- rv$tree_result$tip.label
     id_to_tree_label <- function(id) { gsub(" ", "_", id) }
+    
+    # Load country codes from JSON file (contains country name, alpha2, alpha3, lat, long)
+    country_codes_file <- file.path(app_dir, "country-codes-lat-long-alpha3.json")
+    country_lookup <- NULL
+    if (file.exists(country_codes_file)) {
+      tryCatch({
+        json_data <- fromJSON(country_codes_file)
+        country_lookup <- json_data$ref_country_codes
+      }, error = function(e) {
+        warning("Could not load country codes JSON: ", e$message)
+      })
+    }
+    
+    # Additional country name aliases (maps local names to standard names in JSON)
+    country_aliases <- c(
+      "Marokko" = "Morocco",
+      "Sverige" = "Sweden", 
+      "Tyskland" = "Germany",
+      "Türkiye" = "Turkey",
+      "Czech Republic" = "Czechia",
+      "UK" = "United Kingdom",
+      "USA" = "United States",
+      "UAE" = "United Arab Emirates",
+      "South Korea" = "Korea, Republic of",
+      "Korea" = "Korea, Republic of",
+      "Russia" = "Russian Federation",
+      "Iran" = "Iran, Islamic Republic of",
+      "Syria" = "Syrian Arab Republic",
+      "Vietnam" = "Viet Nam",
+      "Tanzania" = "Tanzania, United Republic of",
+      "Scotland" = "United Kingdom",
+      "England" = "United Kingdom",
+      "Wales" = "United Kingdom"
+    )
+    
+    # Function to lookup country info (returns list with alpha2, latitude, longitude)
+    get_country_info <- function(country_name) {
+      result <- list(alpha2 = "", latitude = NA, longitude = NA)
+      if (is.na(country_name) || country_name == "" || country_name == "Unknown") return(result)
+      
+      # Check if this is an alias first
+      lookup_name <- country_name
+      if (country_name %in% names(country_aliases)) {
+        lookup_name <- country_aliases[[country_name]]
+      }
+      
+      if (!is.null(country_lookup)) {
+        # Try exact match first
+        idx <- which(tolower(country_lookup$country) == tolower(lookup_name))
+        if (length(idx) == 0) {
+          # Try partial match
+          idx <- which(sapply(country_lookup$country, function(x) grepl(lookup_name, x, ignore.case = TRUE)))
+        }
+        if (length(idx) == 0) {
+          # Try reverse partial match (lookup name contains country from JSON)
+          idx <- which(sapply(country_lookup$country, function(x) grepl(x, lookup_name, ignore.case = TRUE)))
+        }
+        
+        if (length(idx) > 0) {
+          match <- country_lookup[idx[1], ]
+          result$alpha2 <- match$alpha2
+          result$latitude <- match$latitude
+          result$longitude <- match$longitude
+        }
+      }
+      
+      return(result)
+    }
+    
     microreact_meta <- data.frame(
       id = sapply(metadata$sample_id, id_to_tree_label),
-      original_id = metadata$sample_id,
       genotype = ifelse(is.na(metadata$genotype), "", metadata$genotype),
       variant = ifelse(is.na(metadata$variant), "", metadata$variant),
       patient_id = ifelse(is.na(metadata$patient_id), "", metadata$patient_id),
@@ -58,52 +159,261 @@ register_microreact_server <- function(input, output, session, rv, con, app_dir)
       year = ifelse(is.na(metadata$sample_year), "", as.character(metadata$sample_year)),
       stringsAsFactors = FALSE
     )
-    countries <- unique(na.omit(microreact_meta$country[microreact_meta$country != ""]))
-    if (length(countries) > 0) {
-      n <- length(countries)
-      if (requireNamespace("RColorBrewer", quietly = TRUE)) {
-        pal_size <- min(12, max(3, n))
-        pal <- RColorBrewer::brewer.pal(pal_size, "Set3")
-        cols <- rep_len(pal, n)
-      } else {
-        cols <- grDevices::rainbow(n)
-      }
-      country_col_map <- setNames(cols, countries)
-      microreact_meta$country__colour <- vapply(microreact_meta$country, function(x) {
-        if (is.na(x) || x == "") return("")
-        if (!is.null(country_col_map[[x]])) return(country_col_map[[x]])
-        return("")
-      }, FUN.VALUE = "")
-    } else {
-      microreact_meta$country__colour <- ""
+    
+    # Lookup country info (ISO code and coordinates) for each sample
+    country_info <- lapply(microreact_meta$country, get_country_info)
+    
+    # Add ISO 3166-1 alpha-2 codes
+    iso_codes <- sapply(country_info, function(x) x$alpha2)
+    if (any(iso_codes != "")) {
+      microreact_meta$iso_country <- iso_codes
     }
-    find_col <- function(patterns, df) {
-      nm <- names(df)
-      for (p in patterns) {
-        idx <- which(tolower(nm) == tolower(p))
-        if (length(idx)) return(nm[idx[1]])
-      }
-      for (p in patterns) {
-        idx <- grep(p, tolower(nm))
-        if (length(idx)) return(nm[idx[1]])
-      }
-      return(NA)
+    
+    # Add latitude and longitude from country lookup
+    latitudes <- sapply(country_info, function(x) x$latitude)
+    longitudes <- sapply(country_info, function(x) x$longitude)
+    if (any(!is.na(latitudes))) {
+      microreact_meta$latitude <- latitudes
+      microreact_meta$longitude <- longitudes
     }
-    lat_col <- find_col(c("latitude", "lat", "y", "geo_lat", "gps_lat"), metadata)
-    lon_col <- find_col(c("longitude", "lon", "lng", "x", "geo_lon", "gps_lon"), metadata)
-    if (!is.na(lat_col) && !is.na(lon_col)) {
-      microreact_meta$latitude <- as.numeric(metadata[[lat_col]])
-      microreact_meta$longitude <- as.numeric(metadata[[lon_col]])
-    } else {
-      microreact_meta$latitude <- NA
-      microreact_meta$longitude <- NA
-    }
+    
     tree_newick <- write.tree(rv$tree_result)
     temp_csv <- tempfile(fileext = ".csv")
     write.csv(microreact_meta, temp_csv, row.names = FALSE, na = "")
     meta_csv <- paste(readLines(temp_csv, warn = FALSE), collapse = "\n")
     unlink(temp_csv)
     list(metadata_csv = meta_csv, tree_newick = tree_newick, metadata_df = microreact_meta)
+  }
+  
+  # Helper function to build microreact project JSON with map configuration
+  build_microreact_project <- function(data, project_name, description) {
+    timestamp <- format(Sys.time(), "%Y%m%d%H%M%S")
+    data_file_id <- paste0("data", timestamp)
+    tree_file_id <- paste0("tree", timestamp)
+    
+    # Base64 encode the file contents with proper data URL prefix
+    csv_base64 <- base64enc::base64encode(charToRaw(data$metadata_csv))
+    tree_base64 <- base64enc::base64encode(charToRaw(data$tree_newick))
+    
+    # Build files as an object with file IDs as keys (matching Microreact schema)
+    files_obj <- list()
+    files_obj[[data_file_id]] <- list(
+      id = data_file_id,
+      name = "metadata.csv",
+      format = "text/csv",
+      type = "data",
+      size = nchar(data$metadata_csv),
+      blob = paste0("data:text/csv;base64,", csv_base64)
+    )
+    files_obj[[tree_file_id]] <- list(
+      id = tree_file_id,
+      name = "tree.nwk",
+      format = "text/x-nh",
+      type = "tree",
+      size = nchar(data$tree_newick),
+      blob = paste0("data:application/octet-stream;base64,", tree_base64)
+    )
+    
+    # Check what geographic data is available in metadata
+    has_iso <- "iso_country" %in% names(data$metadata_df) && any(data$metadata_df$iso_country != "")
+    has_latlong <- "latitude" %in% names(data$metadata_df) && "longitude" %in% names(data$metadata_df)
+    
+    # Build map configuration based on available data
+    map_config <- NULL
+    if (has_iso || has_latlong) {
+      map_config <- list(
+        `map-1` = list(
+          id = "map-1",
+          title = "Map",
+          controls = TRUE,
+          showMarkers = TRUE,
+          showRegions = TRUE,
+          showRegionOutlines = TRUE,
+          grouped = TRUE,
+          nodeSize = 14,
+          minNodeSize = 4,
+          maxNodeSize = 64,
+          markersOpacity = 100,
+          scaleMarkers = FALSE,
+          scaleType = "logarithmic",
+          type = "mapbox",
+          style = "",
+          coordinateUnit = "decimal-degrees",
+          viewport = list(
+            longitude = 0,
+            latitude = 0,
+            zoom = 1.5,
+            pitch = 0,
+            bearing = 0,
+            padding = list(top = 0, bottom = 0, left = 0, right = 0)
+          )
+        )
+      )
+      
+      # Configure for lat/long (preferred when available) or ISO 3166 codes
+      if (has_latlong) {
+        map_config$`map-1`$latitudeField <- "latitude"
+        map_config$`map-1`$longitudeField <- "longitude"
+      }
+      if (has_iso) {
+        map_config$`map-1`$dataType <- "iso-3166-codes"
+        map_config$`map-1`$iso3166Field <- "iso_country"
+      }
+    }
+    
+    # Build tree configuration with blocks for country visualization
+    tree_config <- list(
+      `tree-1` = list(
+        id = "tree-1",
+        title = "Tree",
+        file = tree_file_id,
+        labelField = "id",
+        type = "rc",
+        alignLabels = TRUE,
+        showLabels = TRUE,
+        showLeafLabels = FALSE,
+        showShapes = TRUE,
+        showShapeBorders = TRUE,
+        showPiecharts = TRUE,
+        showEdges = TRUE,
+        nodeSize = 14,
+        fontSize = 16,
+        controls = TRUE,
+        blocks = if (has_iso) list("iso_country", "country") else list("country"),
+        showBlockHeaders = TRUE,
+        blockSize = 14
+      )
+    )
+    
+    # Build timeline configuration
+    timeline_config <- list(
+      `timeline-1` = list(
+        id = "timeline-1",
+        title = "Timeline",
+        dataType = "year-month-day",
+        yearField = "year",
+        nodeSize = 14,
+        style = "bar",
+        controls = FALSE
+      )
+    )
+    
+    # Build table configuration
+    table_config <- list(
+      `table-1` = list(
+        id = "table-1",
+        title = "Metadata",
+        file = data_file_id,
+        displayMode = "cosy",
+        hideUnselected = FALSE
+      )
+    )
+    
+    # Build panes layout
+    panes_model <- list(
+      global = list(
+        splitterSize = 2,
+        tabEnableClose = FALSE,
+        tabSetHeaderHeight = 1,
+        tabSetTabStripHeight = 1,
+        tabSetMinWidth = 160,
+        tabSetMinHeight = 160,
+        borderMinSize = 160,
+        borderBarSize = 20,
+        borderEnableDrop = FALSE
+      ),
+      borders = list(
+        list(
+          type = "border",
+          size = 240,
+          location = "right",
+          children = list(
+            list(type = "tab", id = "--mr-legend-pane", name = "Legend", component = "Legend", enableClose = FALSE, enableDrag = FALSE),
+            list(type = "tab", id = "--mr-selection-pane", name = "Selection", component = "Selection", enableClose = FALSE, enableDrag = FALSE),
+            list(type = "tab", id = "--mr-history-pane", name = "History", component = "History", enableClose = FALSE, enableDrag = FALSE),
+            list(type = "tab", id = "--mr-views-pane", name = "Views", component = "Views", enableClose = FALSE, enableDrag = FALSE)
+          )
+        )
+      ),
+      layout = list(
+        type = "row",
+        id = "#main-row",
+        children = list(
+          list(
+            type = "row",
+            id = "#content-row",
+            children = list(
+              list(
+                type = "row",
+                id = "#top-row",
+                weight = 64,
+                children = list(
+                  list(type = "tabset", id = "#map-tabset", children = list(
+                    list(type = "tab", id = "map-1", name = "Map", component = "Map")
+                  )),
+                  list(type = "tabset", id = "#tree-tabset", children = list(
+                    list(type = "tab", id = "tree-1", name = "Tree", component = "Tree")
+                  ))
+                )
+              ),
+              list(
+                type = "tabset",
+                id = "#bottom-tabset",
+                weight = 48,
+                children = list(
+                  list(type = "tab", id = "timeline-1", name = "Timeline", component = "Timeline"),
+                  list(type = "tab", id = "table-1", name = "Metadata", component = "Table")
+                )
+              )
+            )
+          )
+        )
+      )
+    )
+    
+    microreact_project <- list(
+      schema = "https://microreact.org/schema/v1.json",
+      meta = list(
+        name = project_name, 
+        description = description,
+        timestamp = format(Sys.time(), "%Y-%m-%dT%H:%M:%OS3Z", tz = "UTC")
+      ),
+      files = files_obj,
+      datasets = list(`dataset-1` = list(id = "dataset-1", file = data_file_id, idFieldName = "id")),
+      charts = list(),
+      filters = list(
+        paneFilters = list(),
+        dataFilters = list(),
+        chartFilters = list(),
+        searchOperator = "includes",
+        searchValue = "",
+        selection = list(),
+        selectionBreakdownField = NULL
+      ),
+      maps = map_config,
+      matrices = list(),
+      networks = list(),
+      notes = list(),
+      panes = list(model = panes_model),
+      slicers = list(),
+      styles = list(
+        coloursField = NULL,
+        colourPalettes = list(),
+        defaultColour = "transparent",
+        defaultShape = "circle",
+        colourSettings = list(),
+        labelsField = NULL,
+        legendDirection = "row",
+        shapesField = NULL,
+        shapePalettes = list()
+      ),
+      tables = table_config,
+      timelines = timeline_config,
+      trees = tree_config,
+      views = list()
+    )
+    
+    toJSON(microreact_project, auto_unbox = TRUE, null = "null")
   }
 
   # Downloads: ZIP / CSV / Tree
@@ -162,19 +472,8 @@ register_microreact_server <- function(input, output, session, rv, con, app_dir)
       timestamp <- format(Sys.time(), "%Y%m%d%H%M%S")
       safe_name <- gsub("[^A-Za-z0-9._-]", "_", input$microreact_project_name)
       filename <- paste0(safe_name, "_", timestamp, ".microreact")
-      data_file_id <- paste0("data-", timestamp)
-      tree_file_id <- paste0("tree-", timestamp)
-      files_obj <- list()
-      files_obj[[data_file_id]] <- list(name = "metadata.csv", format = "text/csv", blob = data$metadata_csv)
-      files_obj[[tree_file_id]] <- list(name = "tree.nwk", format = "text/x-nh", blob = data$tree_newick)
-      microreact_project <- list(
-        meta = list(name = input$microreact_project_name, description = input$microreact_description),
-        files = files_obj,
-        datasets = list(list(id = "dataset-1", file = data_file_id, idFieldName = "id")),
-        trees = list(list(id = "tree-1", file = tree_file_id, labelField = "id")),
-        initial_view = list(labelField = "country", colourField = "country", colourColumn = "country__colour", showMap = TRUE)
-      )
-      json_body <- toJSON(microreact_project, auto_unbox = TRUE)
+      
+      json_body <- build_microreact_project(data, input$microreact_project_name, input$microreact_description)
 
       # Save to local vendor viewer data dir (creates file for embedded viewer)
       viewer_data_dir <- file.path(app_dir, "viewer", "public", "data")
@@ -224,13 +523,9 @@ register_microreact_server <- function(input, output, session, rv, con, app_dir)
       timestamp <- format(Sys.time(), "%Y%m%d%H%M%S")
       safe_name <- gsub("[^A-Za-z0-9._-]", "_", input$microreact_project_name)
       filename <- paste0(safe_name, "_", timestamp, ".microreact")
-      data_file_id <- paste0("data-", timestamp)
-      tree_file_id <- paste0("tree-", timestamp)
-      files_obj <- list()
-      files_obj[[data_file_id]] <- list(name = "metadata.csv", format = "text/csv", blob = data$metadata_csv)
-      files_obj[[tree_file_id]] <- list(name = "tree.nwk", format = "text/x-nh", blob = data$tree_newick)
-      microreact_project <- list(meta = list(name = input$microreact_project_name, description = input$microreact_description), files = files_obj, datasets = list(list(id = "dataset-1", file = data_file_id, idFieldName = "id")), trees = list(list(id = "tree-1", file = tree_file_id, labelField = "id")), initial_view = list(labelField = "country", colourField = "country", colourColumn = "country__colour", showMap = TRUE))
-      json_body <- toJSON(microreact_project, auto_unbox = TRUE)
+      
+      json_body <- build_microreact_project(data, input$microreact_project_name, input$microreact_description)
+      
       viewer_data_dir <- file.path(app_dir, "viewer", "public", "data")
       dir.create(viewer_data_dir, recursive = TRUE, showWarnings = FALSE)
       out_path <- file.path(viewer_data_dir, filename)
@@ -279,23 +574,12 @@ register_microreact_server <- function(input, output, session, rv, con, app_dir)
       
       # Build the project JSON
       data <- create_microreact_data()
-      timestamp <- format(Sys.time(), "%Y%m%d%H%M%S")
-      data_file_id <- paste0("data-", timestamp)
-      tree_file_id <- paste0("tree-", timestamp)
+      json_body <- build_microreact_project(data, input$microreact_project_name, input$microreact_description)
       
-      files_obj <- list()
-      files_obj[[data_file_id]] <- list(name = "metadata.csv", format = "text/csv", blob = data$metadata_csv)
-      files_obj[[tree_file_id]] <- list(name = "tree.nwk", format = "text/x-nh", blob = data$tree_newick)
-      
-      microreact_project <- list(
-        meta = list(name = input$microreact_project_name, description = input$microreact_description),
-        files = files_obj,
-        datasets = list(list(id = "dataset-1", file = data_file_id, idFieldName = "id")),
-        trees = list(list(id = "tree-1", file = tree_file_id, labelField = "id")),
-        initial_view = list(labelField = "country", colourField = "country", colourColumn = "country__colour", showMap = TRUE)
-      )
-      
-      json_body <- toJSON(microreact_project, auto_unbox = TRUE)
+      # DEBUG: Save the JSON being sent to a file for inspection
+      debug_file <- file.path(app_dir, "debug_microreact_upload.json")
+      writeLines(json_body, debug_file)
+      message("DEBUG: Saved upload JSON to ", debug_file)
       
       # Upload to Microreact API
       result <- microreact_create_project(rv$microreact_token, json_body)

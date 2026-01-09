@@ -203,8 +203,17 @@ Common causes:
 ### Project doesn't show tree/map
 
 - Ensure your metadata has an `id` column matching tree tip labels
-- For maps, include `latitude` and `longitude` columns
+- For maps, the app now uses **ISO 3166-1 alpha-2 country codes** (e.g., "NO" for Norway, "SE" for Sweden)
+- The app automatically converts country names to ISO codes for mapping
+- If you have latitude/longitude columns, those will be used instead
 - Check that the tree file is valid Newick format
+
+### Countries not showing on map
+
+The app includes a mapping of common country names to ISO codes. If your country isn't appearing:
+- Check the country name in your data matches a known name (e.g., "Norway", "Sweden", "Germany")
+- Some variations are supported: "Norge" → "NO", "Sverige" → "SE", "Tyskland" → "DE"
+- Unknown countries will not appear on the map
 
 ---
 

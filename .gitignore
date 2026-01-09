@@ -16,4 +16,5 @@ envs/export/*
 .Rproj*
 export/*
 .Rproj.user
-.Rhistory
+.Rhistory.microreact_token
+.microreact_token
