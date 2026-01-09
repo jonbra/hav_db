@@ -78,7 +78,11 @@ server <- function(input, output, session) {
     selected_for_analysis = character(0),
     msa_result = NULL,
     tree_result = NULL,
-    microreact_token = NULL
+    microreact_token = NULL,
+    microreact_team_id = NULL,
+    microreact_projects = data.frame(name = character(0), url = character(0), id = character(0), created = character(0), stringsAsFactors = FALSE),
+    current_microreact_url = NULL,
+    auto_open_local = FALSE
   )
 
   con <- reactive({
