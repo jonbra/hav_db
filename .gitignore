@@ -18,3 +18,11 @@ export/*
 .Rproj.user
 .Rhistory.microreact_token
 .microreact_token
+
+# Don't add the actual database
+data/hav.db
+
+# Don't add stored analyses
+analysis/*.rds
+# Ignore generated .microreact files in viewer submodule
+viewer/public/data/*.microreact
