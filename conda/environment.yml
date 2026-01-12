@@ -6,7 +6,5 @@ dependencies:
   - python=3.11
   - mafft
   - iqtree=3.0.1
+  - blast
   - biopython
-  - pip
-  - pip:
-    - rpy2

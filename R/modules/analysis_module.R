@@ -52,7 +52,7 @@ register_analysis_server <- function(input, output, session, rv, con){
     }
   )
 
-  # BLAST-like nearest-match search (R-based)
+  # BLAST nearest-match search (uses NCBI BLAST+ if available, else R fallback)
 observeEvent(input$find_closest_btn, {
   req(con())
   # read query
@@ -75,24 +75,58 @@ observeEvent(input$find_closest_btn, {
     return()
   }
 
-  # Run the R-based nearest-match function
-  tryCatch({
-    max_hits <- as.integer(input$blast_max_hits %||% 10)
-    min_id <- as.numeric(input$blast_min_identity %||% 0)
-    res <- run_blast(query = qset, con = con(), max_hits = max_hits, min_identity = min_id)
-    if (is.null(res) || is.null(res$hits) || nrow(res$hits) == 0) {
-      output$blast_hits <- renderDT({ datatable(data.frame(Message = "No hits found"), options = list(dom = 't')) })
-      rv$blast_hits <- NULL
-      showNotification("No hits found", type = "message")
-      return()
-    }
-    rv$blast_hits <- res
-    output$blast_hits <- renderDT({
-      datatable(res$hits, options = list(pageLength = 25), rownames = FALSE)
+  # Run BLAST search (real BLAST+ or fallback)
+  withProgress(message = "Searching for similar sequences...", {
+    tryCatch({
+      max_hits <- as.integer(input$blast_max_hits %||% 10)
+      
+      # Check if BLAST+ is available
+      use_blast <- blast_available()
+      
+      if (use_blast) {
+        # Use real NCBI BLAST+
+        res <- run_blast_search(query = qset, con = con(), max_hits = max_hits, evalue = 10, num_threads = 2)
+        method_used <- "NCBI BLAST+"
+      } else {
+        # Fall back to R-based pairwise alignment
+        min_id <- as.numeric(input$blast_min_identity %||% 0)
+        res <- run_blast_fallback(query = qset, con = con(), max_hits = max_hits, min_identity = min_id)
+        method_used <- "R pairwise alignment (BLAST+ not installed)"
+      }
+      
+      if (is.null(res) || is.null(res$hits) || nrow(res$hits) == 0) {
+        output$blast_hits <- renderDT({ datatable(data.frame(Message = "No hits found"), options = list(dom = 't')) })
+        rv$blast_hits <- NULL
+        showNotification("No hits found", type = "message")
+        return()
+      }
+      
+      rv$blast_hits <- res
+      
+      # Save results to database if using real BLAST
+      if (use_blast && nrow(res$hits) > 0) {
+        save_blast_results(con(), res$hits)
+      }
+      
+      # Prepare display columns
+      display_df <- res$hits
+      if ("snp_count" %in% names(display_df)) {
+        # Reorder columns for better display
+        cols_order <- c("query_id", "subject_id", "identity_pct", "snp_count", "alignment_length", 
+                        "mismatches", "evalue", "bit_score")
+        cols_order <- cols_order[cols_order %in% names(display_df)]
+        display_df <- display_df[, cols_order, drop = FALSE]
+      }
+      
+      output$blast_hits <- renderDT({
+        datatable(display_df, options = list(pageLength = 25, scrollX = TRUE), rownames = FALSE) %>%
+          formatRound(columns = c("identity_pct"), digits = 2) %>%
+          formatSignif(columns = intersect(c("evalue"), names(display_df)), digits = 3)
+      })
+      showNotification(paste("Search complete using", method_used), type = "message")
+    }, error = function(e) {
+      showNotification(paste("Search failed:", e$message), type = "error")
     })
-    showNotification("Nearest-match search complete", type = "message")
-  }, error = function(e) {
-    showNotification(paste("Search failed:", e$message), type = "error")
   })
 })
 

@@ -95,6 +95,29 @@ CREATE TABLE IF NOT EXISTS analysis_results (
 );
 ")
 
+cat("Creating blast_results table...\n")
+dbExecute(con, "
+CREATE TABLE IF NOT EXISTS blast_results (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    query_sample_id TEXT NOT NULL,
+    hit_sample_id TEXT NOT NULL,
+    identity_pct REAL NOT NULL,
+    alignment_length INTEGER NOT NULL,
+    mismatches INTEGER,
+    gap_opens INTEGER,
+    query_start INTEGER,
+    query_end INTEGER,
+    subject_start INTEGER,
+    subject_end INTEGER,
+    evalue REAL,
+    bit_score REAL,
+    snp_count INTEGER,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (query_sample_id) REFERENCES sequences(sample_id) ON DELETE CASCADE,
+    FOREIGN KEY (hit_sample_id) REFERENCES sequences(sample_id) ON DELETE CASCADE
+);
+")
+
 # =============================================================================
 # Create Indexes for searchable fields
 # =============================================================================
@@ -109,6 +132,8 @@ dbExecute(con, "CREATE INDEX IF NOT EXISTS idx_metadata_variant ON metadata(vari
 dbExecute(con, "CREATE INDEX IF NOT EXISTS idx_metadata_patient_id ON metadata(patient_id);")
 dbExecute(con, "CREATE INDEX IF NOT EXISTS idx_metadata_geo_country ON metadata(geo_country);")
 dbExecute(con, "CREATE INDEX IF NOT EXISTS idx_metadata_geo_location ON metadata(geo_location);")
+dbExecute(con, "CREATE INDEX IF NOT EXISTS idx_blast_query ON blast_results(query_sample_id);")
+dbExecute(con, "CREATE INDEX IF NOT EXISTS idx_blast_hit ON blast_results(hit_sample_id);")
 
 # =============================================================================
 # Verify Setup

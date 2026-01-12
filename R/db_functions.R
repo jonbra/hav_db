@@ -425,6 +425,101 @@ delete_analysis_result <- function(con, id) {
 }
 
 # =============================================================================
+# BLAST Results Operations
+# =============================================================================
+
+#' Save BLAST results to database
+#' @param con Database connection
+#' @param hits Data frame with BLAST hits (from run_blastn or run_blast_search)
+#' @return Number of rows inserted
+save_blast_results <- function(con, hits) {
+  if (is.null(hits) || nrow(hits) == 0) return(0)
+  
+  # Delete existing results for this query
+  for (qid in unique(hits$query_id)) {
+    dbExecute(con, "DELETE FROM blast_results WHERE query_sample_id = ?", params = list(qid))
+  }
+  
+  # Insert new results
+  n_inserted <- 0
+  for (i in seq_len(nrow(hits))) {
+    row <- hits[i, ]
+    dbExecute(con, "
+      INSERT INTO blast_results 
+      (query_sample_id, hit_sample_id, identity_pct, alignment_length, mismatches,
+       gap_opens, query_start, query_end, subject_start, subject_end, evalue, bit_score, snp_count)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      params = list(
+        row$query_id,
+        row$subject_id,
+        row$identity_pct,
+        row$alignment_length,
+        row$mismatches %||% NA,
+        row$gap_opens %||% NA,
+        row$query_start %||% NA,
+        row$query_end %||% NA,
+        row$subject_start %||% NA,
+        row$subject_end %||% NA,
+        row$evalue %||% NA,
+        row$bit_score %||% NA,
+        row$snp_count %||% NA
+      )
+    )
+    n_inserted <- n_inserted + 1
+  }
+  
+  n_inserted
+}
+
+#' Get BLAST results for a query sample
+#' @param con Database connection
+#' @param query_sample_id Query sample ID
+#' @param max_hits Maximum hits to return (NULL for all)
+#' @return Data frame with BLAST hits
+get_blast_results <- function(con, query_sample_id, max_hits = NULL) {
+  query <- "SELECT * FROM blast_results WHERE query_sample_id = ? ORDER BY identity_pct DESC, snp_count ASC"
+  if (!is.null(max_hits)) {
+    query <- paste(query, "LIMIT", as.integer(max_hits))
+  }
+  dbGetQuery(con, query, params = list(query_sample_id))
+}
+
+#' Get all BLAST results with metadata
+#' @param con Database connection
+#' @param query_sample_id Query sample ID
+#' @return Data frame with BLAST hits joined with hit sequence metadata
+get_blast_results_with_metadata <- function(con, query_sample_id) {
+  dbGetQuery(con, "
+    SELECT b.*, m.genotype, m.geo_country, m.sampling_date, m.sample_year
+    FROM blast_results b
+    LEFT JOIN metadata m ON b.hit_sample_id = m.sample_id
+    WHERE b.query_sample_id = ?
+    ORDER BY b.identity_pct DESC, b.snp_count ASC",
+    params = list(query_sample_id)
+  )
+}
+
+#' Delete BLAST results for a query sample
+#' @param con Database connection
+#' @param query_sample_id Query sample ID
+#' @return Number of rows deleted
+delete_blast_results <- function(con, query_sample_id) {
+  dbExecute(con, "DELETE FROM blast_results WHERE query_sample_id = ?", 
+            params = list(query_sample_id))
+}
+
+#' Get samples with stored BLAST results
+#' @param con Database connection
+#' @return Data frame with query sample IDs and result counts
+get_samples_with_blast_results <- function(con) {
+  dbGetQuery(con, "
+    SELECT query_sample_id, COUNT(*) as hit_count, MAX(created_at) as last_run
+    FROM blast_results 
+    GROUP BY query_sample_id 
+    ORDER BY last_run DESC")
+}
+
+# =============================================================================
 # Database Statistics
 # =============================================================================
 

@@ -74,10 +74,11 @@ UI tabs in `R/ui_tab_*.R` return `tabItem()` components. Server logic uses `regi
 
 ## Database Schema
 
-Three tables in SQLite (see [setup_database.R](setup_database.R)):
+Four tables in SQLite (see [setup_database.R](setup_database.R)):
 - `sequences` - sample_id (unique), sequence, sequence_length
 - `metadata` - Foreign key to sequences, includes genotype, geo_country, sampling_date
 - `analysis_results` - Stores MSA/tree results as JSON
+- `blast_results` - Stores BLASTn hits with SNP counts, links query to hit sequences
 
 ## Testing & Validation
 
@@ -113,6 +114,7 @@ con <- dbConnect(SQLite(), ":memory:")
 |------|--------|----------|
 | MAFFT | conda (hav_db env) | Multiple sequence alignment |
 | IQ-TREE 3.x | conda (hav_db env) | Maximum likelihood trees |
+| BLAST+ | conda (hav_db env) | Sequence similarity search (blastn, makeblastdb) |
 | Microreact API | microreact.org | Project upload/sharing |
 
 ## Common Tasks

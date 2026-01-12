@@ -29,6 +29,17 @@ if (!is.null(phy_file) && file.exists(phy_file)) {
   try(source(phy_file), silent = TRUE)
 }
 
+# Source BLAST wrapper (provides run_blast_search, blast_available, etc.)
+blast_file <- NULL
+if (exists("app_dir") && nzchar(app_dir)) {
+  blast_file <- file.path(app_dir, "R", "analyses", "blast_wrapper.R")
+} else {
+  blast_file <- file.path("R", "analyses", "blast_wrapper.R")
+}
+if (!is.null(blast_file) && file.exists(blast_file)) {
+  try(source(blast_file), silent = TRUE)
+}
+
 # NOTE: the `msa` Bioconductor package is not used. Alignments are performed
 # by calling the external `mafft` binary (installed with conda or package
 # manager). This avoids compiling bundled C/C++ code and keeps the runtime
