@@ -228,24 +228,22 @@ output$download_blast_results <- downloadHandler(
   analysis_dir <- file.path(dirname(sys.frame(1)$ofile %||% "."), "analysis")
   dir.create(analysis_dir, recursive = TRUE, showWarnings = FALSE)
 
+  # List saved analyses without deserializing .rds files to avoid loading heavy/unsupported packages
   list_saved_analyses <- function() {
     files <- list.files(analysis_dir, pattern = "\\.rds$", full.names = TRUE)
+    if (length(files) == 0) return(data.frame())
     infos <- lapply(files, function(f) {
-      ok <- tryCatch({ a <- readRDS(f); TRUE }, error = function(e) FALSE)
-      if (!ok) return(NULL)
-      a <- readRDS(f)
+      fi <- file.info(f)
       data.frame(
         file = basename(f),
-        name = if (!is.null(a$name)) a$name else "",
-        type = if (!is.null(a$type)) a$type else "",
-        created = if (!is.null(a$timestamp)) as.character(a$timestamp) else file.info(f)$ctime,
-        description = if (!is.null(a$description)) a$description else "",
+        name = "",
+        type = "",
+        created = as.character(fi$ctime),
+        description = "",
         stringsAsFactors = FALSE
       )
     })
-    infos2 <- Filter(Negate(is.null), infos)
-    if (length(infos2) == 0) return(data.frame())
-    do.call(rbind, infos2)
+    do.call(rbind, infos)
   }
 
   output$stored_analyses <- renderDT({
@@ -295,30 +293,79 @@ output$download_blast_results <- downloadHandler(
       return()
     }
     path <- file.path(analysis_dir, row$file)
-    obj <- tryCatch(readRDS(path), error = function(e) { NULL })
-    if (is.null(obj)) {
-      showNotification("Failed to read analysis file", type = "error")
+
+    # Try to extract only the metadata from the .rds in a separate R process.
+    # This avoids deserializing heavy objects (e.g. msa) inside the Shiny process.
+    meta <- NULL
+    try({
+      # Write extraction script to a temporary file to avoid shell quoting issues
+      script_lines <- c(
+        "options(warn=2)",
+        "library(jsonlite)",
+        paste0("s <- tryCatch(readRDS(\"", normalizePath(path, winslash = "/"), "\"), error=function(e) NULL)"),
+        "if (is.null(s)) { cat(''); quit(status=0) }",
+        "out <- list(name = s$name, type = s$type, timestamp = as.character(s$timestamp), sample_ids = I(list(s$sample_ids)), has_msa = !is.null(s$msa), has_tree = !is.null(s$tree))",
+        "cat(jsonlite::toJSON(out, auto_unbox=TRUE))"
+      )
+      script_file <- tempfile(fileext = ".R")
+      writeLines(script_lines, con = script_file)
+
+      run_cmd <- function() {
+        # Prefer using timeout if available on the system
+        to_path <- Sys.which('timeout')
+        if (nzchar(to_path)) {
+          system2(to_path, args = c('5s', 'Rscript', script_file), stdout = TRUE, stderr = TRUE)
+        } else {
+          system2('Rscript', args = c(script_file), stdout = TRUE, stderr = TRUE)
+        }
+      }
+
+      extract_out <- tryCatch(run_cmd(), error = function(e) NULL)
+      if (!is.null(extract_out) && length(extract_out) > 0) {
+        json_txt <- paste(extract_out, collapse = "\n")
+        if (nchar(json_txt) > 0) meta <- tryCatch(jsonlite::fromJSON(json_txt), error = function(e) NULL)
+      }
+      try({ file.remove(script_file) }, silent = TRUE)
+    }, silent = TRUE)
+
+    if (is.null(meta)) {
+      # Final fallback: attempt to readRDS inside tryCatch (may fail but won't crash)
+      obj <- tryCatch(readRDS(path), error = function(e) NULL)
+      if (is.null(obj)) {
+        showNotification("Failed to read analysis file", type = "error")
+        return()
+      }
+      meta <- list(name = obj$name, type = obj$type, timestamp = as.character(obj$timestamp), sample_ids = obj$sample_ids, has_msa = !is.null(obj$msa), has_tree = !is.null(obj$tree))
+      loaded_tree2 <- NULL
+      if (!is.null(obj$tree)) {
+        loaded_tree <- obj$tree
+        if (is.character(loaded_tree)) {
+          loaded_tree2 <- tryCatch(ape::read.tree(text = loaded_tree), error = function(e) NULL)
+        } else if (inherits(loaded_tree, "phylo")) {
+          loaded_tree2 <- loaded_tree
+        } else if (is.list(loaded_tree) && !is.null(loaded_tree$tip.label)) {
+          class(loaded_tree) <- c("phylo", class(loaded_tree))
+          loaded_tree2 <- loaded_tree
+        }
+      }
+      rv$tree_result <- loaded_tree2
+      rv$msa_result <- NULL
+      rv$selected_for_analysis <- obj$sample_ids %||% rv$selected_for_analysis
+      showNotification(paste("Loaded analysis:", obj$name), type = "message")
       return()
     }
-    loaded_tree <- obj$tree
-    if (!is.null(loaded_tree)) {
-      if (is.character(loaded_tree)) {
-        loaded_tree2 <- tryCatch(ape::read.tree(text = loaded_tree), error = function(e) NULL)
-      } else if (inherits(loaded_tree, "phylo")) {
-        loaded_tree2 <- loaded_tree
-      } else if (is.list(loaded_tree) && !is.null(loaded_tree$tip.label)) {
-        class(loaded_tree) <- c("phylo", class(loaded_tree))
-        loaded_tree2 <- loaded_tree
-      } else {
-        loaded_tree2 <- NULL
-      }
-    } else {
-      loaded_tree2 <- NULL
+
+    # Apply metadata to reactive values; do not attempt to restore MSA/tree objects here
+    if (!is.null(meta$sample_ids)) {
+      ids <- tryCatch({ unlist(meta$sample_ids) }, error = function(e) NULL)
+      if (!is.null(ids) && length(ids) > 0) rv$selected_for_analysis <- as.character(ids)
     }
-    rv$msa_result <- obj$msa
-    rv$tree_result <- loaded_tree2
-    rv$selected_for_analysis <- obj$sample_ids %||% rv$selected_for_analysis
-    showNotification(paste("Loaded analysis:", obj$name), type = "message")
+    rv$msa_result <- NULL
+    rv$tree_result <- NULL
+
+    note <- "Loaded analysis metadata (samples). MSA/tree not restored to avoid blocking."
+    if (!is.null(meta$name) && is.character(meta$name) && length(meta$name) >= 1 && nzchar(meta$name[1])) note <- paste(note, "Name:", meta$name[1])
+    showNotification(note, type = "message")
   })
 
   observeEvent(input$delete_selected_analysis, {
