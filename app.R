@@ -406,6 +406,24 @@ server <- function(input, output, session) {
       export_to_fasta(con(), file, rv$selected_for_analysis, input$export_include_meta)
     }
   )
+
+  # Download sequences selected in the Search tab (current search results selection)
+  output$download_selected_search <- downloadHandler(
+    filename = function() paste0("search_selected_sequences_", Sys.Date(), ".fasta"),
+    content = function(file) {
+      req(con())
+      # Use search_data() reactive from server scope; if not available, query DB directly
+      data <- tryCatch(search_data(), error = function(e) NULL)
+      sel <- input$search_results_rows_selected
+      if (is.null(sel) || length(sel) == 0 || is.null(data) || nrow(data) == 0) {
+        # Write placeholder FASTA
+        writeLines(c(">no_sequences_selected", ""), file)
+        return()
+      }
+      ids <- data$sample_id[sel]
+      export_to_fasta(con(), file, ids, include_metadata = FALSE)
+    }
+  )
   
   output$export_csv <- downloadHandler(
     filename = function() paste0("metadata_", Sys.Date(), ".csv"),

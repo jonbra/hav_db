@@ -27,9 +27,10 @@ ui_tab_search <- function(){
           DT::dataTableOutput("search_results"),
           hr(),
           fluidRow(
-            column(4, actionButton("select_all_results", "Select All", class = "btn-info", width = "100%")),
-            column(4, actionButton("deselect_all_results", "Deselect All", class = "btn-default", width = "100%")),
-            column(4, actionButton("select_for_analysis", "Send to Analysis", class = "btn-success", width = "100%"))
+            column(3, actionButton("select_all_results", "Select All", class = "btn-info", width = "100%")),
+            column(3, actionButton("deselect_all_results", "Deselect All", class = "btn-default", width = "100%")),
+            column(3, actionButton("select_for_analysis", "Send to Analysis", class = "btn-success", width = "100%")),
+            column(3, downloadButton("download_selected_search", "Download Selected", class = "btn-primary", width = "100%"))
           ),
           p(style = "margin-top: 10px;", textOutput("selection_count"))
       )
