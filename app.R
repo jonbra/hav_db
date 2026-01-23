@@ -424,6 +424,121 @@ server <- function(input, output, session) {
       export_to_fasta(con(), file, ids, include_metadata = FALSE)
     }
   )
+
+  # Show modal to select metadata fields and provide downloads
+  observeEvent(input$download_selected_search, {
+    req(con())
+    data <- tryCatch(search_data(), error = function(e) NULL)
+    if (is.null(data) || !is.data.frame(data) || nrow(data) == 0) {
+      showNotification("No search results to download. Run a search and select rows.", type = "warning")
+      return()
+    }
+    # Candidate metadata fields (exclude full sequence column)
+    cols <- setdiff(names(data), c("sequence"))
+    # Ensure sample_id is always first and not offered for deselection
+    cols <- unique(cols)
+
+    dlg <- modalDialog(
+      title = "Download Selected Sequences",
+      p("Select which metadata fields to append to FASTA headers (they will be appended after the sample_id, separated by underscores)."),
+      checkboxGroupInput("download_meta_fields", "Metadata fields to append:", choices = cols, selected = c("sampling_date", "geo_country")),
+      tags$hr(),
+      p("You can also download the metadata for the selected sequences as a separate CSV file."),
+      p(tags$small("Filename format: ", tags$code("search_selected_sequences_YYYY-MM-DD.fasta"))),
+      footer = tagList(
+        uiOutput("download_fasta_button_ui"),
+        uiOutput("download_meta_button_ui"),
+        modalButton("Close")
+      ),
+      size = "m",
+      easyClose = TRUE
+    )
+    showModal(dlg)
+  })
+
+  # Download FASTA with selected metadata appended to header
+  output$download_selected_search_file <- downloadHandler(
+    filename = function() paste0("search_selected_sequences_", Sys.Date(), ".fasta"),
+    content = function(file) {
+      req(con())
+      data <- tryCatch(search_data(), error = function(e) NULL)
+      sel <- input$search_results_rows_selected
+      if (is.null(sel) || length(sel) == 0 || is.null(data) || nrow(data) == 0) {
+        writeLines(c(">no_sequences_selected", ""), file)
+        return()
+      }
+      ids <- data$sample_id[sel]
+      # Fetch full records for selected ids
+      recs <- get_sequences_with_metadata(con(), ids)
+      if (nrow(recs) == 0) {
+        writeLines(c(">no_sequences_selected", ""), file)
+        return()
+      }
+      meta_fields <- input$download_meta_fields %||% character(0)
+      fasta_lines <- character()
+      for (i in seq_len(nrow(recs))) {
+        row <- recs[i, ]
+        extras <- character()
+        if (length(meta_fields) > 0) {
+          for (mf in meta_fields) {
+            val <- as.character(row[[mf]])
+            if (is.na(val) || val == "" || is.null(val)) val <- ""
+            # sanitize whitespace and pipes and commas, replace spaces with underscores
+            val <- gsub("\\s+", "_", val)
+            val <- gsub("[\\|,]", "", val)
+            extras <- c(extras, val)
+          }
+        }
+        header_parts <- c(as.character(row$sample_id), extras[extras != ""]) 
+        header <- paste(header_parts, collapse = "_")
+        fasta_lines <- c(fasta_lines, paste0(">", header))
+        seq_wrapped <- gsub("(.{80})", "\\1\\n", as.character(row$sequence))
+        seq_wrapped <- sub("\\n$", "", seq_wrapped)
+        fasta_lines <- c(fasta_lines, seq_wrapped)
+      }
+      writeLines(fasta_lines, file)
+    }
+  )
+
+  # Download metadata CSV for selected sequences
+  output$download_selected_metadata_csv <- downloadHandler(
+    filename = function() paste0("search_selected_metadata_", Sys.Date(), ".csv"),
+    content = function(file) {
+      req(con())
+      data <- tryCatch(search_data(), error = function(e) NULL)
+      sel <- input$search_results_rows_selected
+      if (is.null(sel) || length(sel) == 0 || is.null(data) || nrow(data) == 0) {
+        write.csv(data.frame(Message = "No sequences selected"), file, row.names = FALSE)
+        return()
+      }
+      ids <- data$sample_id[sel]
+      recs <- get_sequences_with_metadata(con(), ids)
+      if (nrow(recs) == 0) {
+        write.csv(data.frame(Message = "No sequences selected"), file, row.names = FALSE)
+        return()
+      }
+      write.csv(recs, file, row.names = FALSE)
+    }
+  )
+
+  # Render conditional download buttons inside modal (disabled if no selection)
+  output$download_fasta_button_ui <- renderUI({
+    sel <- input$search_results_rows_selected
+    if (!is.null(sel) && length(sel) > 0) {
+      downloadButton("download_selected_search_file", "Download FASTA", class = "btn-primary")
+    } else {
+      tags$button("Download FASTA", class = "btn btn-primary", disabled = TRUE)
+    }
+  })
+
+  output$download_meta_button_ui <- renderUI({
+    sel <- input$search_results_rows_selected
+    if (!is.null(sel) && length(sel) > 0) {
+      downloadButton("download_selected_metadata_csv", "Download metadata CSV", class = "btn-info")
+    } else {
+      tags$button("Download metadata CSV", class = "btn btn-info", disabled = TRUE)
+    }
+  })
   
   output$export_csv <- downloadHandler(
     filename = function() paste0("metadata_", Sys.Date(), ".csv"),
