@@ -7,6 +7,7 @@
 
 library(httr)
 library(jsonlite)
+library(base64enc)
 
 # Base URL for Microreact API
 MICROREACT_API_BASE <- "https://microreact.org/api"
@@ -16,9 +17,7 @@ MICROREACT_API_BASE <- "https://microreact.org/api"
 #' @param token The API token to validate
 #' @return TRUE if format looks valid, FALSE otherwise
 microreact_validate_token_format <- function(token) {
-
-if (is.null(token) || !is.character(token)) return(FALSE)
-  # JWT tokens start with "eyJ"
+  if (is.null(token) || !is.character(token)) return(FALSE)
   grepl("^eyJ", token) && nchar(token) > 50
 }
 
@@ -31,15 +30,13 @@ if (is.null(token) || !is.character(token)) return(FALSE)
 #' @return List with success status, response data, and any error message
 microreact_api_request <- function(endpoint, token, body = NULL, method = "POST") {
   url <- paste0(MICROREACT_API_BASE, endpoint)
-  
   headers <- add_headers(
     "Content-Type" = "application/json; charset=utf-8",
     "Access-Token" = token
   )
-  
+
   tryCatch({
     if (method == "POST" && !is.null(body)) {
-      # If body is already JSON string, use it directly
       if (is.character(body) && jsonlite::validate(body)) {
         json_body <- body
       } else {
@@ -51,10 +48,10 @@ microreact_api_request <- function(endpoint, token, body = NULL, method = "POST"
     } else {
       response <- GET(url, headers)
     }
-    
+
     status <- status_code(response)
     content_text <- content(response, as = "text", encoding = "UTF-8")
-    
+
     if (status >= 200 && status < 300) {
       result <- tryCatch(
         fromJSON(content_text),
@@ -77,126 +74,57 @@ microreact_api_request <- function(endpoint, token, body = NULL, method = "POST"
 # PROJECT MANAGEMENT
 # ============================================================================
 
-#' Create a Microreact Project from JSON
-#' 
-#' Upload a .microreact file (JSON) to create a new project.
-#' 
-#' @param token API access token
-#' @param project_json JSON string or list containing the project definition
-#' @return List with success status, project id, url, and any error
-#' 
-#' @examples
-#' \dontrun{
-#' result <- microreact_create_project(token, readLines("project.microreact"))
-#' if (result$success) {
-#'   cat("Project URL:", result$data$url, "\n")
-#' }
-#' }
 microreact_create_project <- function(token, project_json) {
   if (!microreact_validate_token_format(token)) {
     return(list(success = FALSE, data = NULL, error = "Invalid token format"))
   }
-  
   microreact_api_request("/projects/create", token, body = project_json)
 }
 
-#' Create Project from File
-#' 
-#' Read a .microreact file and upload it to create a project.
-#' 
-#' @param token API access token
-#' @param file_path Path to the .microreact file
-#' @return List with success status, project id, url, and any error
 microreact_create_project_from_file <- function(token, file_path) {
   if (!file.exists(file_path)) {
     return(list(success = FALSE, data = NULL, error = "File not found"))
   }
-  
   project_json <- paste(readLines(file_path, warn = FALSE), collapse = "\n")
   microreact_create_project(token, project_json)
 }
 
-#' Update an Existing Project
-#' 
-#' @param token API access token
-#' @param project_id The project ID to update
-#' @param project_json Updated project JSON
-#' @return List with success status and any error
 microreact_update_project <- function(token, project_id, project_json) {
   if (!microreact_validate_token_format(token)) {
     return(list(success = FALSE, data = NULL, error = "Invalid token format"))
   }
-  
   endpoint <- paste0("/projects/", project_id, "/update")
   microreact_api_request(endpoint, token, body = project_json)
 }
 
 # ============================================================================
-# TEAM MANAGEMENT (Experimental API)
+# TEAM MANAGEMENT
 # ============================================================================
 
-#' Create a New Team
-#' 
-#' @param token API access token
-#' @param team_name Name for the new team
-#' @return List with success status, team id, and any error
 microreact_create_team <- function(token, team_name) {
   if (!microreact_validate_token_format(token)) {
     return(list(success = FALSE, data = NULL, error = "Invalid token format"))
   }
-  
   body <- list(name = team_name)
   microreact_api_request("/teams/create", token, body = body)
 }
 
-#' Add Members to a Team
-#' 
-#' @param token API access token
-#' @param team_id The team ID (e.g., "53E42osSgysbaQGva5NciD")
-#' @param emails Character vector of email addresses to add
-#' @return List with success status and any error
 microreact_add_team_members <- function(token, team_id, emails) {
-  if (!microreact_validate_token_format(token)) {
-    return(list(success = FALSE, data = NULL, error = "Invalid token format"))
-  }
-  
-  if (!is.character(emails) || length(emails) == 0) {
-    return(list(success = FALSE, data = NULL, error = "emails must be a non-empty character vector"))
-  }
-  
+  if (!microreact_validate_token_format(token)) return(list(success = FALSE, data = NULL, error = "Invalid token format"))
+  if (!is.character(emails) || length(emails) == 0) return(list(success = FALSE, data = NULL, error = "emails must be a non-empty character vector"))
   body <- list(team = team_id, emails = as.list(emails))
   microreact_api_request("/teams/add-member", token, body = body)
 }
 
-#' List Team Members
-#' 
-#' @param token API access token
-#' @param team_id The team ID
-#' @return List with success status, member list, and any error
 microreact_list_team_members <- function(token, team_id) {
-  if (!microreact_validate_token_format(token)) {
-    return(list(success = FALSE, data = NULL, error = "Invalid token format"))
-  }
-  
+  if (!microreact_validate_token_format(token)) return(list(success = FALSE, data = NULL, error = "Invalid token format"))
   body <- list(team = team_id)
   microreact_api_request("/teams/list-members", token, body = body)
 }
 
-#' Remove Members from a Team
-#' 
-#' @param token API access token
-#' @param team_id The team ID
-#' @param emails Character vector of email addresses to remove
-#' @return List with success status and any error
 microreact_remove_team_members <- function(token, team_id, emails) {
-  if (!microreact_validate_token_format(token)) {
-    return(list(success = FALSE, data = NULL, error = "Invalid token format"))
-  }
-  
-  if (!is.character(emails) || length(emails) == 0) {
-    return(list(success = FALSE, data = NULL, error = "emails must be a non-empty character vector"))
-  }
-  
+  if (!microreact_validate_token_format(token)) return(list(success = FALSE, data = NULL, error = "Invalid token format"))
+  if (!is.character(emails) || length(emails) == 0) return(list(success = FALSE, data = NULL, error = "emails must be a non-empty character vector"))
   body <- list(team = team_id, emails = as.list(emails))
   microreact_api_request("/teams/remove-member", token, body = body)
 }
@@ -205,38 +133,16 @@ microreact_remove_team_members <- function(token, team_id, emails) {
 # PROJECT SHARING
 # ============================================================================
 
-#' Share a Project with a Team
-#' 
-#' @param token API access token
-#' @param team_id The team ID to share with
-#' @param project_id The project ID to share
-#' @param role Access role: "viewer", "editor", or "manager"
-#' @return List with success status and any error
 microreact_share_with_team <- function(token, team_id, project_id, role = "viewer") {
-  if (!microreact_validate_token_format(token)) {
-    return(list(success = FALSE, data = NULL, error = "Invalid token format"))
-  }
-  
+  if (!microreact_validate_token_format(token)) return(list(success = FALSE, data = NULL, error = "Invalid token format"))
   valid_roles <- c("viewer", "editor", "manager")
-  if (!role %in% valid_roles) {
-    return(list(success = FALSE, data = NULL, error = paste("role must be one of:", paste(valid_roles, collapse = ", "))))
-  }
-  
+  if (!role %in% valid_roles) return(list(success = FALSE, data = NULL, error = paste("role must be one of:", paste(valid_roles, collapse = ", "))))
   body <- list(team = team_id, project = project_id, role = role)
   microreact_api_request("/shares/add-team", token, body = body)
 }
 
-#' Unshare a Project from a Team
-#' 
-#' @param token API access token
-#' @param team_id The team ID
-#' @param project_id The project ID to unshare
-#' @return List with success status and any error
 microreact_unshare_from_team <- function(token, team_id, project_id) {
-  if (!microreact_validate_token_format(token)) {
-    return(list(success = FALSE, data = NULL, error = "Invalid token format"))
-  }
-  
+  if (!microreact_validate_token_format(token)) return(list(success = FALSE, data = NULL, error = "Invalid token format"))
   body <- list(team = team_id, project = project_id)
   microreact_api_request("/shares/remove-team", token, body = body)
 }
@@ -244,66 +150,108 @@ microreact_unshare_from_team <- function(token, team_id, project_id) {
 # ============================================================================
 # UTILITY FUNCTIONS
 # ============================================================================
-  
-#' Build Microreact Project JSON
-#' 
-#' Create a .microreact JSON structure from metadata and tree data.
-#' 
-#' @param metadata_csv CSV string of metadata
-#' @param tree_newick Newick string of phylogenetic tree
-#' @param project_name Name for the project
-#' @param description Project description
-#' @return JSON string suitable for upload
-build_microreact_json <- function(metadata_csv, tree_newick, project_name = "Project", description = "") {
-  timestamp <- format(Sys.time(), "%Y%m%d%H%M%S")
-  data_file_id <- paste0("data-", timestamp)
-  tree_file_id <- paste0("tree-", timestamp)
-  
-  files_obj <- list()
-  files_obj[[data_file_id]] <- list(
-    name = "metadata.csv",
+
+build_microreact_payload_from_paths <- function(metadata_csv_path, tree_nwk_path,
+                                                project_name = "HAV_Analysis",
+                                                description = "HAV phylogenetic analysis",
+                                                include_image_path = NULL) {
+  if (!file.exists(metadata_csv_path)) stop("metadata CSV not found: ", metadata_csv_path)
+  if (!file.exists(tree_nwk_path)) stop("tree file not found: ", tree_nwk_path)
+
+  ts <- format(Sys.time(), "%Y%m%d%H%M%S")
+  data_id <- paste0("data", ts)
+  tree_id <- paste0("tree", ts)
+
+  csv_b64 <- base64enc::base64encode(metadata_csv_path)
+  tree_b64 <- base64enc::base64encode(tree_nwk_path)
+
+  size_csv <- as.integer(file.info(metadata_csv_path)$size)
+  size_tree <- as.integer(file.info(tree_nwk_path)$size)
+
+  files <- list()
+  files[[data_id]] <- list(
+    id = data_id,
+    name = basename(metadata_csv_path),
     format = "text/csv",
-    blob = metadata_csv
+    type = "data",
+    size = size_csv,
+    blob = paste0("data:text/csv;base64,", csv_b64)
   )
-  files_obj[[tree_file_id]] <- list(
-    name = "tree.nwk",
+  files[[tree_id]] <- list(
+    id = tree_id,
+    name = basename(tree_nwk_path),
     format = "text/x-nh",
-    blob = tree_newick
+    type = "tree",
+    size = size_tree,
+    blob = paste0("data:application/octet-stream;base64,", tree_b64)
   )
-  
-  project <- list(
+
+  meta_time_iso <- format(Sys.time(), "%Y-%m-%dT%H:%M:%OS3Z", tz = "UTC")
+
+  payload <- list(
+    schema = "https://microreact.org/schema/v1.json",
     meta = list(
       name = project_name,
-      description = description
+      description = description,
+      timestamp = meta_time_iso
     ),
-    files = files_obj,
+    files = files,
     datasets = list(
-      list(
+      `dataset-1` = list(
         id = "dataset-1",
-        file = data_file_id,
+        file = data_id,
         idFieldName = "id"
       )
     ),
     trees = list(
-      list(
+      `tree-1` = list(
         id = "tree-1",
-        file = tree_file_id,
-        labelField = "id"
+        title = "Tree",
+        file = tree_id,
+        labelsField = "id",
+        type = "rc",
+        alignLabels = TRUE,
+        showLabels = TRUE,
+        showLeafLabels = TRUE,
+        showShapes = TRUE,
+        showShapeBorders = TRUE,
+        showInternalLabels = TRUE,
+        showPiecharts = TRUE,
+        showEdges = TRUE,
+        nodeSize = 14,
+        fontSize = 16,
+        controls = TRUE,
+        blocks = list(),
+        showBlockHeaders = FALSE,
+        blockSize = 14
+      )
+    ),
+    styles = list(
+      nodes = list(
+        fill = "#1f77b4",
+        stroke = "#000000",
+        strokeWidth = 1
+      ),
+      edges = list(
+        stroke = "#999999",
+        strokeWidth = 1
+      ),
+      labels = list(
+        font = "Arial",
+        size = 14,
+        color = "#333333"
       )
     )
   )
-  
-  toJSON(project, auto_unbox = TRUE)
+
+  if (!is.null(include_image_path) && file.exists(include_image_path)) {
+    img_b64 <- base64enc::base64encode(include_image_path)
+    payload$meta$image <- paste0("data:image/png;base64,", img_b64)
+  }
+
+  toJSON(payload, auto_unbox = TRUE, pretty = TRUE)
 }
 
-#' Test API Connection
-#' 
-#' Attempt to verify the token works by making a minimal API call.
-#' Note: There's no dedicated "ping" endpoint, so this creates a minimal
-#' validation based on token format only.
-#' 
-#' @param token API access token
-#' @return List with success status and message
 microreact_test_connection <- function(token) {
   if (!microreact_validate_token_format(token)) {
     return(list(
@@ -311,7 +259,6 @@ microreact_test_connection <- function(token) {
       message = "Token format is invalid. Microreact tokens are JWT format starting with 'eyJ'."
     ))
   }
-  
   list(
     success = TRUE,
     message = "Token format is valid (JWT). Full validation occurs when creating a project."

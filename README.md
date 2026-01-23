@@ -12,6 +12,19 @@ A lightweight local database for storing and analyzing HAV sequences with metada
 
 ## Quick Start
 
+Stopping a running Shiny instance
+
+```bash
+# Stop any Shiny instance started with `shiny::runApp`
+pkill -f "shiny::runApp" || true
+
+# Alternatively, if you know the port (default 3838) you can kill the process using it
+# (Linux):
+kill -9 $(lsof -t -i:3838) || true
+
+# If you started Shiny interactively in a terminal, press Ctrl+C in that terminal.
+```
+
 ```bash
 # Access the database on port 3838
 R -e "shiny::runApp('.', host='0.0.0.0', port=3838)"
