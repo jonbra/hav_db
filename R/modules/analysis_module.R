@@ -175,7 +175,21 @@ output$download_blast_results <- downloadHandler(
 
   output$tree_plot <- renderPlot({
     req(rv$tree_result)
-    plot(rv$tree_result, type = "phylogram", cex = 0.8)
+    tree <- rv$tree_result
+    plot(tree, type = "phylogram", cex = 0.8)
+    # If the phylo object contains node labels (e.g. bootstrap values from IQ-TREE), display them
+    if (!is.null(tree$node.label) && length(tree$node.label) > 0) {
+      # Some tools store bootstrap as numeric strings; coerce to character safely
+      nlab <- as.character(tree$node.label)
+      # Only display non-empty labels and when count matches internal nodes
+      if (length(nlab) == tree$Nnode && any(nzchar(nlab))) {
+        # Place labels at internal nodes; adjust cex based on tree size
+        lab_cex <- ifelse(tree$Nnode > 100, 0.4, ifelse(tree$Nnode > 50, 0.6, 0.8))
+        try({
+          nodelabels(text = nlab, cex = lab_cex, frame = "none", adj = c(1.0, -0.2))
+        }, silent = TRUE)
+      }
+    }
     title(paste(input$tree_method, "tree"))
   })
 
