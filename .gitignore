@@ -26,3 +26,5 @@ data/hav.db
 analysis/*.rds
 # Ignore generated .microreact files in viewer submodule
 viewer/public/data/*.microreact
+# Ignore microreact testing file
+debug_microreact_upload.json
