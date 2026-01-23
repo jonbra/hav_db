@@ -269,9 +269,10 @@ register_microreact_server <- function(input, output, session, rv, con, app_dir)
         file = tree_file_id,
         labelField = "id",
         type = "rc",
-        alignLabels = TRUE,
+        alignLabels = FALSE,
         showLabels = TRUE,
-        showLeafLabels = FALSE,
+        showLeafLabels = TRUE,
+        showInternalLabels = TRUE,
         showShapes = TRUE,
         showShapeBorders = TRUE,
         showPiecharts = TRUE,
@@ -279,7 +280,7 @@ register_microreact_server <- function(input, output, session, rv, con, app_dir)
         nodeSize = 14,
         fontSize = 16,
         controls = TRUE,
-        blocks = if (has_iso) list("iso_country", "country") else list("country"),
+        blocks = list(), # empty list for metadata blocks not showing
         showBlockHeaders = TRUE,
         blockSize = 14
       )
@@ -397,12 +398,12 @@ register_microreact_server <- function(input, output, session, rv, con, app_dir)
       panes = list(model = panes_model),
       slicers = list(),
       styles = list(
-        coloursField = NULL,
+        coloursField = "country",
         colourPalettes = list(),
         defaultColour = "transparent",
         defaultShape = "circle",
         colourSettings = list(),
-        labelsField = NULL,
+        labelsField = "variant",
         legendDirection = "row",
         shapesField = NULL,
         shapePalettes = list()
